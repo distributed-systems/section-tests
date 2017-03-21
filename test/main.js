@@ -116,7 +116,7 @@
     section.setup('Setting things up', () => {
         section.warn('pay attention, there stuff happening ...');
         section.info('creating things ..');
-        section.info('updateing things ....');
+        section.info('updating things ....');
     });
 
 

@@ -20,6 +20,13 @@
         return stack;
     };
 
+
+    process.on('uncaughtException', (err) => {
+        console.log(err.message);
+        err.stack.forEach(frame => console.log(frame.toString()));
+    });
+
+
     
 
     let files = process.argv.slice(2).filter(s => s && s[0] !== '-');

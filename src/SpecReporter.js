@@ -162,9 +162,12 @@
 
                 
                 // display the friggin stack
-                message.err.stack.slice(1).forEach((frame) => {
-                    console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
-                });
+                if (typeof message.err.stack === 'string') log(message.err.stack);
+                else {
+                    message.err.stack.slice(1).forEach((frame) => {
+                        console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
+                    });
+                }
             }
         }
 

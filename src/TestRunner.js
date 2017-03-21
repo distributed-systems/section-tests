@@ -33,9 +33,10 @@
             for (const file of files) {
                 try {
                     require(file);
-                } catch (e) {
+                } catch (err) {
                     console.log(`Failed to load ${file}:`);
-                    console.trace(e);
+                    console.log(err.message);
+                    err.stack.forEach(frame => console.log(frame.toString()));
                     process.exit(1);
                 }                
             }

@@ -47,6 +47,34 @@
 
 
 
+        warn(message) {
+            this.log(message, 'warn');
+        }
+
+        error(message) {
+            this.log(message, 'error');
+        }
+
+        success(message) {
+            this.log(message, 'success');
+        }
+
+        info(message) {
+            this.log(message, 'info');
+        }
+
+        notice(message) {
+            this.log(message, 'notice');
+        }
+
+        log(message, level = 'info') {
+            if (this.sendLog) this.sendLog(message, level);
+            else throw new Error('Cannot log message outside of a test, setup or destroyer routine!');
+        }
+
+
+
+
 
 
         collectTransports(transports = []) {
@@ -71,6 +99,13 @@
             iface.destroy = this.destroy.bind(this);
             iface.execute = this.execute.bind(this);
             iface.use = this.use.bind(this);
+
+
+            iface.warn = this.warn.bind(this);
+            iface.error = this.error.bind(this);
+            iface.success = this.success.bind(this);
+            iface.info = this.info.bind(this);
+            iface.notice = this.notice.bind(this);
 
 
             return iface;
@@ -128,7 +163,7 @@
 
         setup(...params) {
             let cb;
-            let name = 'anonymous';
+            let name = 'Setting Up';
 
             params.forEach((param, index) => {
                 if (type.function(param)) cb = param;
@@ -149,7 +184,7 @@
 
         destroy(...params) {
             let cb;
-            let name = 'anonymous';
+            let name = 'Destroying';
 
             params.forEach((param, index) => {
                 if (type.function(param)) cb = param;
@@ -187,13 +222,13 @@
             let cb;
             let name = 'anonymous';
 
-
             params.forEach((param, index) => {
                 if (type.object(param)) options = param;
                 else if (type.function(param)) cb = param;
                 else if (type.string(param)) name = param;
                 else throw new Error(`Ìnvalid option at position ${index}!`);
             });
+
 
 
             if (!this.childSections.has(name)) {

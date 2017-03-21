@@ -14,6 +14,7 @@
         constructor(options) {
             super(options);
 
+            this.name = options.name;
             this.type = 'destroyerSuccessMessage';
         }
     };

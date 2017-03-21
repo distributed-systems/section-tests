@@ -16,8 +16,12 @@
 
 
     // make sure strucutred stacktraces are returned
-    Error.prepareStackTrace = (e, stack) => stack;
+    Error.prepareStackTrace = (e, stack) => {
+        if (e.returnStructured) return stack;
+        else return stack.toString();
+    };
 
+    
 
     let files = process.argv.slice(2).filter(s => s && s[0] !== '-');
 

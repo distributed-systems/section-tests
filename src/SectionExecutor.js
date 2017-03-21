@@ -6,10 +6,14 @@
     const SectionMessage = require('./message/SectionMessage');
     const TestErrorMessage = require('./message/TestErrorMessage');
     const TestSuccessMessage = require('./message/TestSuccessMessage');
+    const TestStartMessage = require('./message/TestStartMessage');
     const SetupErrorMessage = require('./message/SetupErrorMessage');
     const SetupSuccessMessage = require('./message/SetupSuccessMessage');
+    const SetupStartMessage = require('./message/SetupStartMessage');
     const DestroyerErrorMessage = require('./message/DestroyerErrorMessage');
     const DestroyerSuccessMessage = require('./message/DestroyerSuccessMessage');
+    const DestroyerStartMessage = require('./message/DestroyerStartMessage');
+    const LogMessage = require('./message/LogMessage');
     
 
 
@@ -38,7 +42,9 @@
             this.sendMessage(message);
 
 
-            await this.executeSetups();
+            const err = await this.executeSetups();
+            if (err) process.exit(1);
+
             await this.executeTests();
             await this.executeSubSections();
             await this.executeDestroyers();
@@ -85,7 +91,11 @@
        
         formatStackTrace(err) {
             const frames = [];
+
+
+            err.returnStructured = true;
             const stack = err.stack;
+
 
             if (typeof stack === 'string') return stack;
             else {
@@ -135,9 +145,12 @@
             for (const test of section.tests.values()) {
                 const start = Date.now();
 
+                this.sendMessage(new TestStartMessage({start, test, section}));
 
                 try {
+                    section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
                     await test.cb();
+                    section.sendLog = null;
                 } catch (e) {
 
                     // send the error message
@@ -163,18 +176,34 @@
 
 
 
+        sendLogMessage(options) {
+            this.sendMessage(new LogMessage(options));
+        }
+
+
+
+
+
 
         async executeDestroyers() {
             const section = this.section;
 
             for (const destroyer of section.destroyers.values()) {
+                const start = Date.now();
+                const name = destroyer.name;
+
+                this.sendMessage(new DestroyerStartMessage({section, name}));
+
                 try {
+                    section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
                     await destroyer.cb();
+                    section.sendLog = null;
                 } catch (e) {
 
                     // send the error message
                     const err = this.convertError(e);
-                    const errorMessage = new DestroyerErrorMessage({err, destroyer, section});
+                    const duration = Date.now() - start;
+                    const errorMessage = new DestroyerErrorMessage({err, destroyer, section, duration, name});
                     this.sendMessage(errorMessage);
 
                     // skipt to next destroyer
@@ -183,7 +212,8 @@
 
 
                 // send succes message
-                const successMessage = new DestroyerSuccessMessage({destroyer, section});
+                const duration = Date.now() - start;
+                const successMessage = new DestroyerSuccessMessage({destroyer, section, duration, name});
                 this.sendMessage(successMessage);
             }
         }
@@ -198,22 +228,31 @@
             const section = this.section;
 
             for (const setup of section.setups.values()) {
+                const start = Date.now();
+                const name = setup.name;
+
+                this.sendMessage(new SetupStartMessage({section, name}));
+
                 try {
+                    section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
                     await setup.cb();
+                    section.sendLog = null;
                 } catch (e) {
 
                     // send the error message
                     const err = this.convertError(e);
-                    const errorMessage = new SetupErrorMessage({err, setup, section});
+                    const duration = Date.now() - start;
+                    const errorMessage = new SetupErrorMessage({err, setup, section, duration, name});
                     this.sendMessage(errorMessage);
 
                     // skipt to next setup
-                    continue;
+                    return err;
                 }
 
 
                 // send succes message
-                const successMessage = new SetupSuccessMessage({setup, section});
+                const duration = Date.now() - start;
+                const successMessage = new SetupSuccessMessage({setup, section, duration, name});
                 this.sendMessage(successMessage);
             }
         }

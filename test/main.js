@@ -23,7 +23,9 @@
 
             section.test('create', async () => {
                 //log('testing');
-                
+                return new Promise((r) => {
+                    setTimeout(r, 600);
+                });
             });
 
             section.test('delete', async () => {
@@ -32,13 +34,17 @@
         })
 
 
-        section.test('create thisngs that are cure', async () => {
+        section.test('create things that are cute', async () => {
                 //log('testing');
                 
         });
 
         section.test('delete shitty stuff', async () => {
             //log('testing');
+            section.warn('not good');
+            section.info('not good');
+            section.success('not good');
+            section.error('not good');
         });
 
         section.test('create another', async () => {
@@ -69,10 +75,7 @@
 
 
     section.setup(() => {
-        log('setting up');
+        section.warn('not good');
     });
 
-
-
-    section.execute();
 }

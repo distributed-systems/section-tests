@@ -4,7 +4,7 @@
 
     const log = require('ee-log');
     const glob = require('glob');
-    const Section = require('./Section');
+    const section = require('../');
 
 
 
@@ -22,8 +22,6 @@
         async execute() {
             const files = await this.getFiles();
             await this.loadFiles(files);
-
-            const section = new Section();
             await section.execute();
         }
 
@@ -36,8 +34,8 @@
                 try {
                     require(file);
                 } catch (e) {
-                    log.info(`Failed to load ${file}:`);
-                    log(e);
+                    console.log(`Failed to load ${file}:`);
+                    console.trace(e);
                     process.exit(1);
                 }                
             }

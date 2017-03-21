@@ -28,7 +28,7 @@
                 });
             });
 
-            section.test('delete', async () => {
+            section.test('some method without a name', async () => {
                 //log('testing');
             });
         })
@@ -41,10 +41,7 @@
 
         section.test('delete shitty stuff', async () => {
             //log('testing');
-            section.warn('not good');
-            section.info('not good');
-            section.success('not good');
-            section.error('not good');
+            
         });
 
         section.test('create another', async () => {
@@ -52,7 +49,7 @@
             
         });
 
-        section.test('delete all', async () => {
+        section.test('bulk create the good stuff', async () => {
             //log('testing');
         });
 
@@ -69,13 +66,65 @@
                 //log('testing');
             });
         })
+
+
+
+
+        section('Event', (section) => {
+            section.test('create', async () => {
+                //log('testing');
+                
+            });
+
+            section.test('update', async () => {
+                //log('testing');
+            });
+
+            section.test('read', async () => {
+                //log('testing');
+            });
+
+            section.test('delete', async () => {
+                //log('testing');
+            });
+        });
+    });
+
+
+    section('Integration', (section) => {
+        section.test('create', async () => {
+            //log('testing');
+            
+        });
+
+        section.test('update', async () => {
+            //log('testing');
+        });
+
+        section.test('read', async () => {
+            //log('testing');
+        });
+
+        section.test('delete', async () => {
+            //log('testing');
+        });
     });
 
 
 
 
-    section.setup(() => {
-        section.warn('not good');
+    section.setup('Setting things up', () => {
+        section.warn('pay attention, there stuff happening ...');
+        section.info('creating things ..');
+        section.info('updateing things ....');
+    });
+
+
+    section.destroy('Stopping services', () => {
+        section.info('you should probably know :/');
+        section.warn('think twice ...');
+        section.error('uh, really? proably not good :)');
+        section.success(`yep, that's nice!`);
     });
 
 }

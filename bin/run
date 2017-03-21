@@ -17,8 +17,7 @@
 
     // make sure strucutred stacktraces are returned
     Error.prepareStackTrace = (e, stack) => {
-        if (e.returnStructured) return stack;
-        else return stack.toString();
+        return stack;
     };
 
     

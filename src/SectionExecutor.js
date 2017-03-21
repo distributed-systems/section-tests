@@ -66,6 +66,9 @@
         * @returns {object}
         */
         convertError(err) {
+            err.returnStructured = true;
+
+
             const data = {
                   stack: this.formatStackTrace(err)
                 , message: err.message
@@ -91,9 +94,6 @@
        
         formatStackTrace(err) {
             const frames = [];
-
-
-            err.returnStructured = true;
             const stack = err.stack;
 
 

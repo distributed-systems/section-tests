@@ -67,18 +67,18 @@
         */
         convertError(err) {
             err.returnStructured = true;
-
+            const isAssertion = /AssertionError/gi.test(err.name);
 
             const data = {
                   stack: this.formatStackTrace(err)
                 , message: err.message
-                , type: err.name
+                , type: isAssertion ? 'AssertionError' : err.name
             }
 
-            if (err.name === 'AssertionError') {
-                if (err.expected) data.expected = err.expected;
-                if (err.actual) data.actual = err.actual;
-                if (err.operator) data.operator = err.operator;
+            if (isAssertion) {
+                if (err.expected !== undefined) data.expected = err.expected;
+                if (err.actual !== undefined) data.actual = err.actual;
+                if (err.operator !== undefined) data.operator = err.operator;
             }
 
             return data;

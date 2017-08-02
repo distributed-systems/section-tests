@@ -109,13 +109,13 @@
 
 
         displaySetupStartMessage(message) {
-            if (!this.setupStarted) console.log(''), this.setupStarted = true;
+            //if (!this.setupStarted) console.log(''), this.setupStarted = true;
             console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.white(message.name)}`);
         }
 
 
         displaySetupErrorMessage(message) {
-            if (!this.setupStarted) console.log(''), this.setupStarted = true;
+            //if (!this.setupStarted) console.log(''), this.setupStarted = true;
             console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
             message.err.stack.forEach((frame) => {
                 console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
@@ -124,7 +124,7 @@
 
 
         displaySetupSuccessMessage(message) {
-            if (!this.setupStarted) console.log(''), this.setupStarted = true;
+            //if (!this.setupStarted) console.log(''), this.setupStarted = true;
             console.log(`${this.pad(4)}${chalk.green('✔ ')}${chalk.white(message.name)}${this.getDurationMark(message)}`);
         }
 
@@ -198,13 +198,13 @@
 
 
         displayDestroyerStartMessage(message) {
-            if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
+            //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
             console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.white(message.name)}`);
         }
 
 
         displayDestroyerErrorMessage(message) {
-            if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
+            //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
             console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
             message.err.stack.forEach((frame) => {
                 console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
@@ -213,7 +213,7 @@
 
 
         displayDestroyerSuccessMessage(message) {
-            if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
+            //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
             console.log(`${this.pad(4)}${chalk.green('✔ ')}${chalk.white(message.name)}${this.getDurationMark(message)}`);
         }
 

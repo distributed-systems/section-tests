@@ -110,7 +110,7 @@
 
         displaySetupStartMessage(message) {
             //if (!this.setupStarted) console.log(''), this.setupStarted = true;
-            console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.white(message.name)}`);
+            console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.grey(message.name)}`);
         }
 
 
@@ -125,7 +125,7 @@
 
         displaySetupSuccessMessage(message) {
             //if (!this.setupStarted) console.log(''), this.setupStarted = true;
-            console.log(`${this.pad(4)}${chalk.green('✔ ')}${chalk.white(message.name)}${this.getDurationMark(message)}`);
+            console.log(`${this.pad(4)}${chalk.dim.green('✔ ')}${chalk.grey(message.name)}${this.getDurationMark(message)}`);
         }
 
 
@@ -199,7 +199,7 @@
 
         displayDestroyerStartMessage(message) {
             //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
-            console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.white(message.name)}`);
+            console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.grey(message.name)}`);
         }
 
 
@@ -214,7 +214,7 @@
 
         displayDestroyerSuccessMessage(message) {
             //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
-            console.log(`${this.pad(4)}${chalk.green('✔ ')}${chalk.white(message.name)}${this.getDurationMark(message)}`);
+            console.log(`${this.pad(4)}${chalk.dim.green('✔ ')}${chalk.grey(message.name)}${this.getDurationMark(message)}`);
         }
 
 

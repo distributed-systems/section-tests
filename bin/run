@@ -15,8 +15,15 @@
 
 
 
-    // make sure strucutred stacktraces are returned
+    // make sure structured stacktraces are returned
     Error.prepareStackTrace = (e, stack) => {
+
+        // rxjs is messing with the stack, give
+        // it something to work on
+        stack.split = (...args) => {
+            return stack.map(frame => frame.toString()).join('\n').split(...args);
+        }
+
         return stack;
     };
 

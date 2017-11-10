@@ -59,7 +59,7 @@
 
 
         /**
-        * converts an error object to a transportabel standard error
+        * converts an error object to a transportable standard error
         *
         * @param {error} err
         *
@@ -159,12 +159,12 @@
                     const errorMessage = new TestErrorMessage({err, test, section, duration});
                     this.sendMessage(errorMessage);
 
-                    // skipt to next test
+                    // skip to next test
                     continue;
                 }
 
 
-                // send succes message
+                // send success message
                 const duration = Date.now() - start;
                 const successMessage = new TestSuccessMessage({test, section, duration});
                 this.sendMessage(successMessage);

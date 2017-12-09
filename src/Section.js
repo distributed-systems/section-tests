@@ -4,6 +4,7 @@
 
     const type = require('ee-types');
     const log = require('ee-log');
+    const assert = require('assert');
     const SectionExecutor = require('./SectionExecutor');
 
 
@@ -19,12 +20,47 @@
             this.options = options;
 
 
+            // the global timeout time
+            if (this.isRootSection()) this.timeoutTime = 2000;
+
+
             // store 
             this.childSections = new Map();
             this.tests = new Set();
             this.setups = new Set();
             this.destroyers = new Set();
             this.transports = new Set();
+        }
+
+
+
+
+
+
+        /**
+        * the user may set a custom timeout time
+        */
+        setTimeout(msec) {
+            assert(type.number(msec), `The timeout time must be an number!`);
+            this.timeoutTime = msec;
+        }
+
+
+
+        /**
+        * returns the current timeout time
+        */
+        getTimeoutTime() {
+            return this.timeoutTime || !this.isRootSection() && this.parent.getTimeoutTime();
+        }
+
+
+
+        /**
+        * remove the custom timeout time
+        */
+        resetTimeoutTime() {
+            this.timeoutTime = null;
         }
 
 
@@ -107,6 +143,8 @@
             iface.info = this.info.bind(this);
             iface.notice = this.notice.bind(this);
 
+            // let the user define timeouts
+            iface.setTimeout = this.setTimeout.bind(this);
 
             return iface;
         }

@@ -7,7 +7,7 @@
     const assert = require('assert');
 
 
-
+    section.setTimeout(1000);
 
 
     section.use(new SpecReporter());
@@ -54,6 +54,15 @@
         });
 
 
+
+        section('Timeout', (section) => {
+            section.test('should timeout', () => {
+                section.setTimeout(300);
+                return new Promise(() => {
+                    setTimeout(() => {}, 3000);
+                });
+            });
+        });
 
 
         section('Venue', (section) => {

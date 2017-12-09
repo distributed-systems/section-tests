@@ -3,6 +3,7 @@
 
 
     const log = require('ee-log');
+    const type = require('ee-types');
     const SectionMessage = require('./message/SectionMessage');
     const TestErrorMessage = require('./message/TestErrorMessage');
     const TestSuccessMessage = require('./message/TestSuccessMessage');
@@ -147,9 +148,43 @@
 
                 this.sendMessage(new TestStartMessage({start, test, section}));
 
+            
+
                 try {
+                    // collect log messages from the current 
+                    // section while the test is running
                     section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
-                    await test.cb();
+
+                    // run the test
+                    await new Promise((resolve, reject) => {
+                        const testPromise = test.cb();
+
+                        if (!type.promise(testPromise)) resolve();
+                        else {
+
+                            // let tests time out
+                            let timeoutEncountered = false;
+                            const timeoutTime = section.getTimeoutTime();
+                            const timeout = setTimeout(() => {
+                                timeoutEncountered = true;
+                                reject(new Error(`The test encountered a timeout after ${timeoutTime} milliseconds. Use section.setTimeout(msec) to increase the timeout time`));
+                            }, timeoutTime);
+
+                            // reset the timeout for the next test
+                            section.resetTimeoutTime();
+
+                            // run the actual test
+                            testPromise.then(() => {
+                                clearTimeout(timeout);
+                                if (!timeoutEncountered) resolve();
+                            }).catch((err) => {
+                                clearTimeout(timeout);
+                                if (!timeoutEncountered) reject(err);
+                            });
+                        }
+                    });
+
+                    // stop accepting log messages from the curren test
                     section.sendLog = null;
                 } catch (e) {
 

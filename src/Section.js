@@ -177,19 +177,19 @@
 
         test(...params) {
             let options = {};
-            let cb;
+            let executeTest;
             let name = 'anonymous';
 
 
             params.forEach((param, index) => {
                 if (type.object(param)) options = param;
-                else if (type.function(param)) cb = param;
+                else if (type.function(param)) executeTest = param;
                 else if (type.string(param)) name = param;
                 else throw new Error(`Ìnvalid option at position ${index}!`);
             });
 
 
-            this.tests.add({name, cb, options});
+            this.tests.add({name, executeTest, options});
         }
 
 
@@ -200,17 +200,17 @@
 
 
         setup(...params) {
-            let cb;
+            let executeSetup;
             let name = 'Setting Up';
 
             params.forEach((param, index) => {
-                if (type.function(param)) cb = param;
+                if (type.function(param)) executeSetup = param;
                 else if (type.string(param)) name = param;
                 else throw new Error(`Ìnvalid option at position ${index}!`);
             });
 
 
-            this.setups.add({name, cb});
+            this.setups.add({name, executeSetup});
         }
 
 
@@ -221,17 +221,17 @@
 
 
         destroy(...params) {
-            let cb;
+            let executeDestroy;
             let name = 'Destroying';
 
             params.forEach((param, index) => {
-                if (type.function(param)) cb = param;
+                if (type.function(param)) executeDestroy = param;
                 else if (type.string(param)) name = param;
                 else throw new Error(`Ìnvalid option at position ${index}!`);
             });
 
 
-            this.destroyers.add({name, cb});
+            this.destroyers.add({name, executeDestroy});
         }
 
 
@@ -257,12 +257,12 @@
 
         createSection(...params) {
             let options = {};
-            let cb;
+            let executeSection;
             let name = 'anonymous';
 
             params.forEach((param, index) => {
                 if (type.object(param)) options = param;
-                else if (type.function(param)) cb = param;
+                else if (type.function(param)) executeSection = param;
                 else if (type.string(param)) name = param;
                 else throw new Error(`Ìnvalid option at position ${index}!`);
             });
@@ -276,7 +276,7 @@
                 this.childSections.set(name, instance);
             }
 
-            cb(this.childSections.get(name).getInterface());
+            executeSection(this.childSections.get(name).getInterface());
         }
     }
 

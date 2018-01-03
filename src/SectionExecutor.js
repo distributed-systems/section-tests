@@ -4,6 +4,7 @@
 
     const log = require('ee-log');
     const type = require('ee-types');
+    const Callsite = require('@distributed-systems/callsite');
     const SectionMessage = require('./message/SectionMessage');
     const TestErrorMessage = require('./message/TestErrorMessage');
     const TestSuccessMessage = require('./message/TestSuccessMessage');
@@ -28,6 +29,7 @@
 
         constructor({section}) {
             this.section = section;
+            this.callsite = new Callsite();
         }
 
 
@@ -70,11 +72,22 @@
             err.returnStructured = true;
             const isAssertion = /AssertionError/gi.test(err.name);
 
+
+            // get the stack from thecallsite library,
+            // it is able to get stacks without interfering
+            // with other code
+            const frames = this.callsite.getRawStack({
+                err,
+                dontCapture: true,
+            }).slice(0, 1);
+
+
             const data = {
-                  stack: this.formatStackTrace(err)
+                  stack: this.formatStackTrace(frames)
                 , message: err.message
                 , type: isAssertion ? 'AssertionError' : err.name
             }
+
 
             if (isAssertion) {
                 if (err.expected !== undefined) data.expected = err.expected;
@@ -93,30 +106,19 @@
 
 
        
-        formatStackTrace(err) {
-            const frames = [];
-            const stack = err.stack;
-
-
-            if (typeof stack === 'string') return stack;
-            else {
-                stack.forEach((frame) => {
-                    frames.push({
-                          typeName: frame.getTypeName()
-                        , functionName: frame.getFunctionName()
-                        , methodName: frame.getMethodName()
-                        , fileName: frame.getFileName()
-                        , lineNumber: frame.getLineNumber()
-                        , columnNumber: frame.getColumnNumber()
-                        , isConstructor: frame.isConstructor()
-                        , isNative: frame.isNative()
-                        , isToplevel: frame.isToplevel()
-                        , isEval: frame.isEval()
-                    });
-                });
-
-                return frames;
-            }
+        formatStackTrace(frames) {
+            return frames.map((frame) => ({
+                typeName: frame.getTypeName(),
+                functionName: frame.getFunctionName(),
+                methodName: frame.getMethodName(),
+                fileName: frame.getFileName(),
+                lineNumber: frame.getLineNumber(),
+                columnNumber: frame.getColumnNumber(),
+                isConstructor: frame.isConstructor(),
+                isNative: frame.isNative(),
+                isToplevel: frame.isToplevel(),
+                isEval: frame.isEval(),
+            }));
         }
 
 
@@ -148,7 +150,6 @@
 
                 this.sendMessage(new TestStartMessage({start, test, section}));
 
-            
 
                 try {
                     // collect log messages from the current 
@@ -157,7 +158,7 @@
 
                     // run the test
                     await new Promise((resolve, reject) => {
-                        const testPromise = test.cb();
+                        const testPromise = test.executeTest();
 
                         if (!type.promise(testPromise)) resolve();
                         else {
@@ -187,7 +188,7 @@
                     // stop accepting log messages from the curren test
                     section.sendLog = null;
                 } catch (e) {
-
+                    
                     // send the error message
                     const err = this.convertError(e);
                     const duration = Date.now() - start;
@@ -231,7 +232,7 @@
 
                 try {
                     section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
-                    await destroyer.cb();
+                    await destroyer.executeDestroy();
                     section.sendLog = null;
                 } catch (e) {
 
@@ -270,7 +271,7 @@
 
                 try {
                     section.sendLog = (message, level) => this.sendLogMessage({section, message, level});
-                    await setup.cb();
+                    await setup.executeSetup();
                     section.sendLog = null;
                 } catch (e) {
 

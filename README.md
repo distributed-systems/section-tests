@@ -2,6 +2,8 @@
 
 A beautiful, extensible and lightweight async test framework.
 
+***Attention, this module works since version 2 only with node 10+ and the --experimental-modules flag set!***
+
 
 ![](https://github.com/distributed-systems/section-tests/raw/master/doc/screenshot.png)
 
@@ -15,7 +17,7 @@ A beautiful, extensible and lightweight async test framework.
 **2. Add test command to your package.json file**
 
     "scripts": {
-        "test": "./node_modules/.bin/section ./test/**/*.js"
+        "test": "node --experimental-modules ./node_modules/.bin/section ./test/**/*.mjs"
     },
 
 You may use [glob](https://www.npmjs.com/package/glob) patterns for defining the files 

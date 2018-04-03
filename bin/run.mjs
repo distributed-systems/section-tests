@@ -9,14 +9,11 @@ import log from 'ee-log';
 
 // handle unhandleed rejections
 process.on('unhandledRejection', (reason, p) => {
-    console.log(reason);
+    log(reason);
 });
 
 
-process.on('uncaughtException', (err) => {
-    console.log(err.message);
-    err.stack.forEach(frame => console.log(frame.toString()));
-});
+process.on('uncaughtException', log);
 
 
 

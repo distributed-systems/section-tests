@@ -32,7 +32,10 @@ export default class TestRunner {
             } catch (err) {
                 console.log(`Failed to load ${file}:`);
                 console.log(err.message);
-                err.stack.forEach(frame => console.log(frame.toString()));
+                
+                if (Array.isArray(err.stack)) err.stack.forEach(frame => console.log(frame.toString()));
+                else console.log(err.stack);
+
                 process.exit(1);
             }                
         }

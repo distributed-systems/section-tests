@@ -119,6 +119,13 @@ section('Integration', (section) => {
 });
 
 
+section('Tools', (section) => {
+    section.test('wait', async () => {
+        await section.wait(500);
+    });
+});
+
+
 
 
 section.setup('Setting things up', () => {

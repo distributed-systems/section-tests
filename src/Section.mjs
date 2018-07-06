@@ -146,9 +146,24 @@ class Section {
         // let the user define timeouts
         iface.setTimeout = this.setTimeout.bind(this);
 
+        // tools
+        iface.wait = this.wait.bind(this);
+
         return iface;
     }
 
+
+
+
+
+    /**
+    * wait some time
+    */
+    wait(msecs) {
+        return new Promise((resolve) => {
+            setTimeout(resolve, msecs);
+        });
+    }
 
 
 

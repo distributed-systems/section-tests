@@ -72,7 +72,7 @@ export default class SectionExecutor {
         const isAssertion = /AssertionError/gi.test(err.name);
 
 
-        // get the stack from thecallsite library,
+        // get the stack from the callsite library,
         // it is able to get stacks without interfering
         // with other code
         const frames = this.callsite.getRawStack({
@@ -82,7 +82,7 @@ export default class SectionExecutor {
 
 
         const data = {
-              stack: this.formatStackTrace(frames)
+              stack: Array.isArray(frames) ? this.formatStackTrace(frames) : err.stack
             , message: err.message
             , type: isAssertion ? 'AssertionError' : err.name
         }

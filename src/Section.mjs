@@ -135,6 +135,7 @@ class Section {
         iface.destroy = this.destroy.bind(this);
         iface.execute = this.execute.bind(this);
         iface.use = this.use.bind(this);
+        iface.continue = this.continueSection.bind(this);
 
 
         iface.warn = this.warn.bind(this);
@@ -270,6 +271,29 @@ class Section {
 
 
 
+    continueSection(...params) {
+        let options = {};
+        let executeSection;
+        let name = 'anonymous';
+
+        params.forEach((param, index) => {
+            if (type.object(param)) options = param;
+            else if (type.function(param)) executeSection = param;
+            else if (type.string(param)) name = param;
+            else throw new Error(`Invalid option at position ${index}!`);
+        });
+
+        if (!this.childSections.has(name)) {
+            const parent = this;
+            const instance = new Section({name, parent, options});
+            this.childSections.set(name, instance);
+        }
+
+        executeSection(this.childSections.get(name).getInterface());
+    }
+
+
+
     createSection(...params) {
         let options = {};
         let executeSection;
@@ -283,13 +307,9 @@ class Section {
         });
 
 
-
-        if (!this.childSections.has(name)) {
-            const parent = this;
-            const instance = new Section({name, parent, options});
-
-            this.childSections.set(name, instance);
-        }
+        const parent = this;
+        const instance = new Section({name, parent, options});
+        this.childSections.set(name, instance);
 
         executeSection(this.childSections.get(name).getInterface());
     }

@@ -138,6 +138,6 @@ section.setup('Setting things up', () => {
 section.destroy('Stopping services', () => {
     section.info('you should probably know :/');
     section.warn('think twice ...');
-    section.error('uh, really? proably not good :)');
+    section.error('uh, really? probably not good :)');
     section.success(`yep, that's nice!`);
 });

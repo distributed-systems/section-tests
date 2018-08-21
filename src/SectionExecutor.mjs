@@ -128,9 +128,11 @@ export default class SectionExecutor {
 
 
     async executeSubSections() {
-        for (const section of this.section.childSections.values()) {
-            const subExecutor = new SectionExecutor({section});
-            await subExecutor.execute();
+        for (const sectionList of this.section.childSections.values()) {
+            for (const section of sectionList) {
+                const subExecutor = new SectionExecutor({section});
+                await subExecutor.execute();
+            }
         }
     }
 

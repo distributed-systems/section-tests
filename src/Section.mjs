@@ -286,10 +286,10 @@ class Section {
         if (!this.childSections.has(name)) {
             const parent = this;
             const instance = new Section({name, parent, options});
-            this.childSections.set(name, instance);
+            this.childSections.set(name, [instance]);
         }
 
-        executeSection(this.childSections.get(name).getInterface());
+        executeSection(this.childSections.get(name)[0].getInterface());
     }
 
 
@@ -309,9 +309,11 @@ class Section {
 
         const parent = this;
         const instance = new Section({name, parent, options});
-        this.childSections.set(name, instance);
 
-        executeSection(this.childSections.get(name).getInterface());
+        if (!this.childSections.has(name)) this.childSections.set(name, []);
+        this.childSections.get(name).push(instance);
+
+        executeSection(instance.getInterface());
     }
 }
 

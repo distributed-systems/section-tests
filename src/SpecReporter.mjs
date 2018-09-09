@@ -116,9 +116,7 @@ export default class SpecReporter {
     displaySetupErrorMessage(message) {
         //if (!this.setupStarted) console.log(''), this.setupStarted = true;
         console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
-        message.err.stack.forEach((frame) => {
-            console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
-        });
+        this.displayStack(message.err);
     }
 
 
@@ -130,6 +128,17 @@ export default class SpecReporter {
 
 
 
+
+
+
+    displayStack(err) {
+        if (typeof err.stack === 'string') log(err.stack);
+        else {
+            err.stack.slice(1).forEach((frame) => {
+                console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
+            });
+        }
+    }
 
 
 
@@ -158,15 +167,7 @@ export default class SpecReporter {
             console.log(`${this.pad(8)}${chalk.dim('operator: ')}  ${chalk.dim(message.err.operator)}`);
             console.log(`${this.pad(8)}${chalk.green('expected: ')}  ${chalk.white(message.err.expected)}\n`);
         } else {
-
-            
-            // display the friggin stack
-            if (typeof message.err.stack === 'string') log(message.err.stack);
-            else {
-                message.err.stack.slice(1).forEach((frame) => {
-                    console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
-                });
-            }
+            this.displayStack(message.err);
         }
     }
 
@@ -205,9 +206,7 @@ export default class SpecReporter {
     displayDestroyerErrorMessage(message) {
         //if (!this.destroyingStarted) console.log(''), this.destroyingStarted = true;
         console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
-        message.err.stack.forEach((frame) => {
-            console.log(`${this.pad(8)}${chalk.dim(`at ${frame.functionName} (${frame.fileName}:${frame.lineNumber})`)}`);
-        });
+        this.displayStack(message.err);
     }
 
 

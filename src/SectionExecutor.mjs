@@ -67,7 +67,7 @@ export default class SectionExecutor {
     *
     * @returns {object}
     */
-    convertError(err) {
+    convertError(err) {log(err.dest);
         err.returnStructured = true;
         const isAssertion = /AssertionError/gi.test(err.name);
 
@@ -78,7 +78,7 @@ export default class SectionExecutor {
         const frames = this.callsite.getRawStack({
             err,
             dontCapture: true,
-        }).slice(0, 1);
+        });
 
 
         const data = {

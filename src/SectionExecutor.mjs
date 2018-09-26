@@ -67,7 +67,7 @@ export default class SectionExecutor {
     *
     * @returns {object}
     */
-    convertError(err) {log(err.dest);
+    convertError(err) {
         err.returnStructured = true;
         const isAssertion = /AssertionError/gi.test(err.name);
 
@@ -254,8 +254,6 @@ export default class SectionExecutor {
             this.sendMessage(successMessage);
         }
     }
-
-
 
 
 

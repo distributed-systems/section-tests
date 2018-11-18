@@ -1,8 +1,4 @@
-'use strict';
-
-
-import log from 'ee-log';
-import type from 'ee-types';
+import type from '../es-modules/distributed-systems/types/1.0.0+/types.mjs';
 import Callsite from '@distributed-systems/callsite';
 import SectionMessage from './message/SectionMessage';
 import TestErrorMessage from './message/TestErrorMessage';

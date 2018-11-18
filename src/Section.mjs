@@ -1,9 +1,4 @@
-
-'use strict';
-
-
-import type from 'ee-types';
-import log from 'ee-log';
+import type from '../es-modules/distributed-systems/types/1.0.0+/types.mjs';
 import assert from 'assert';
 import SectionExecutor from './SectionExecutor';
 
@@ -47,7 +42,7 @@ class Section {
 
 
 
-    /**
+    /** 
     * returns the current timeout time
     */
     getTimeoutTime() {

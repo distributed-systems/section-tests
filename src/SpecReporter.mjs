@@ -1,9 +1,4 @@
-'use strict';
-
-
-import log from 'ee-log';
-import chalk from 'chalk';
-
+import chalk from './lib/chalk.mjs';
 
 
 
@@ -34,7 +29,6 @@ export default class SpecReporter {
 
 
     send(message) {
-        //log(message, '✔'.green);
         this.padAmount = 4 * message.depth - 2;
         this.displayMessage(message);
 
@@ -46,7 +40,7 @@ export default class SpecReporter {
 
 
 
-    displayMessage(message) {//log(message);
+    displayMessage(message) {
         switch (message.type) {
             case 'sectionMessage': return this.displaySectionMessage(message);
 

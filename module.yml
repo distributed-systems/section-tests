@@ -1,0 +1,14 @@
+name: section-tests
+organization: distributed-systems
+version: 1.0.0
+elevator-pitch: A simple, modular and easy to use test framework  
+commands:
+    test: node --no-warnings --experimental-modules ./bin/run.mjs ./test/*.mjs
+npm-convert:
+    source:
+        - ./src
+    destination: ./npm
+dev-link:
+    - glob
+    - callsite
+    - types

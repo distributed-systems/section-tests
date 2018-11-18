@@ -1,34 +1,29 @@
 #!/usr/bin/env node
-'use strict';
-
 import TestRunner from '../src/TestRunner';
 import path from 'path';
-import log from 'ee-log';
 
 
 
-// handle unhandleed rejections
-process.on('unhandledRejection', (reason, p) => {
-    log(reason);
+// handle unhandled rejections
+process.on('unhandledRejection', (err, p) => {
+    // another hack because node is crappy with syntax errors. see
+    // TestRunner.analyzeSyntaxError. It needs to execute node to get to the
+    // error message. but it will also cause an unhandled rejection. no matter
+    // what.
+    if (err.message.startsWith('Unexpected token')) return;
+    else console.trace(err);
 });
 
 
-process.on('uncaughtException', log);
+process.on('uncaughtException', console.trace);
 
 
 
 
-let files = process.argv.slice(2).filter(s => s && s[0] !== '-');
-
-files = files.map((file) => {
-    if (file[0] === '.') {
-        return path.join(process.env.PWD, file)
-    } return file;
-});
-
+let patterns = process.argv.slice(2).filter(s => s && s[0] !== '-');
 
 
 // executes as binary, run tests
 new TestRunner({
-    patterns: files
+    patterns,
 }).execute();

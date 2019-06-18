@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-import TestRunner from '../src/TestRunner';
+import TestRunner from '../src/TestRunner.mjs';
 import path from 'path';
 import log from 'ee-log';
 

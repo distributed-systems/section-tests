@@ -2,7 +2,7 @@
 
 import log from 'ee-log';
 import glob from 'glob';
-import section from'../';
+import section from'../index.mjs';
 
 
 export default class TestRunner {

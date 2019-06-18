@@ -5,7 +5,7 @@
 import type from 'ee-types';
 import log from 'ee-log';
 import assert from 'assert';
-import SectionExecutor from './SectionExecutor';
+import SectionExecutor from './SectionExecutor.mjs';
 
 
 

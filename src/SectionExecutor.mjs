@@ -4,17 +4,17 @@
 import log from 'ee-log';
 import type from 'ee-types';
 import Callsite from '@distributed-systems/callsite';
-import SectionMessage from './message/SectionMessage';
-import TestErrorMessage from './message/TestErrorMessage';
-import TestSuccessMessage from './message/TestSuccessMessage';
-import TestStartMessage from './message/TestStartMessage';
-import SetupErrorMessage from './message/SetupErrorMessage';
-import SetupSuccessMessage from './message/SetupSuccessMessage';
-import SetupStartMessage from './message/SetupStartMessage';
-import DestroyerErrorMessage from './message/DestroyerErrorMessage';
-import DestroyerSuccessMessage from './message/DestroyerSuccessMessage';
-import DestroyerStartMessage from './message/DestroyerStartMessage';
-import LogMessage from './message/LogMessage';
+import SectionMessage from './message/SectionMessage.mjs';
+import TestErrorMessage from './message/TestErrorMessage.mjs';
+import TestSuccessMessage from './message/TestSuccessMessage.mjs';
+import TestStartMessage from './message/TestStartMessage.mjs';
+import SetupErrorMessage from './message/SetupErrorMessage.mjs';
+import SetupSuccessMessage from './message/SetupSuccessMessage.mjs';
+import SetupStartMessage from './message/SetupStartMessage.mjs';
+import DestroyerErrorMessage from './message/DestroyerErrorMessage.mjs';
+import DestroyerSuccessMessage from './message/DestroyerSuccessMessage.mjs';
+import DestroyerStartMessage from './message/DestroyerStartMessage.mjs';
+import LogMessage from './message/LogMessage.mjs';
 
 
 

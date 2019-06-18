@@ -2,7 +2,7 @@
 'use strict';
 
 import log from 'ee-log'; 
-import section, {SpecReporter} from '../';
+import section, {SpecReporter} from '../index.mjs';
 import assert from 'assert';
 
 

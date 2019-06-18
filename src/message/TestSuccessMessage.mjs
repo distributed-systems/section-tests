@@ -2,7 +2,7 @@
 
 
 
-import SuccessMessage from './SuccessMessage';
+import SuccessMessage from './SuccessMessage.mjs';
 
 
 

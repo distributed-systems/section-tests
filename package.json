@@ -25,10 +25,8 @@
   "homepage": "https://github.com/distributed-systems/section-tests#readme",
   "dependencies": {
     "@distributed-systems/callsite": "^1.1.1",
-    "chalk": "^1.1.3",
-    "ee-log": "^1.1.0",
-    "ee-types": "^2.1.4",
-    "glob": "^7.1.4"
+    "@distributed-systems/glob": "^2.0.1",
+    "@distributed-systems/types": "^2.0.1"
   },
   "bin": {
     "section": "./bin/run.js"

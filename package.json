@@ -2,9 +2,9 @@
   "name": "section-tests",
   "version": "2.2.4",
   "description": "TDD for node.js",
-  "main": "index.mjs",
+  "main": "npm/index.js",
   "scripts": {
-    "test": "node --experimental-modules ./bin/run.mjs ./test/*.mjs"
+    "test": "node --experimental-modules ./bin/run.mjs ./test/*.js"
   },
   "repository": {
     "type": "git",
@@ -31,6 +31,7 @@
     "glob": "^7.1.4"
   },
   "bin": {
-    "section": "./bin/run.mjs"
-  }
+    "section": "./bin/run.js"
+  },
+  "type": "module"
 }

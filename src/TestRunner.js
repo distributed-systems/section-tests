@@ -1,5 +1,5 @@
 import section from'../index.js';
-import glob from '../es-modules/distributed-systems/glob/1.0.0+/src/glob.js';
+import glob from '../es-modules/distributed-systems/glob/2.0.0+/src/glob.js';
 import { exec } from 'child_process';
 import path from 'path';
 

@@ -1,4 +1,4 @@
-import type from '../es-modules/distributed-systems/types/1.0.0+/types.js';
+import type from '../es-modules/distributed-systems/types/2.0.0+/types.js';
 import Callsite from '../es-modules/distributed-systems/callsite/2.0.0+/Callsite.js';
 import SectionMessage from './message/SectionMessage.js';
 import TestErrorMessage from './message/TestErrorMessage.js';

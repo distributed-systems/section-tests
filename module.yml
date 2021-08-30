@@ -9,6 +9,7 @@ commands:
 npm-convert:
     source:
         - ./src
+        - ./index.js
     destination: ./npm
     mapping:
         distributed-systems/glob: @distributed-systems/glob

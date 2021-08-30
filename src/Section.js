@@ -1,4 +1,4 @@
-import type from '../es-modules/distributed-systems/types/1.0.0+/types.js';
+import type from '../es-modules/distributed-systems/types/2.0.0+/types.js';
 import assert from 'assert';
 import SectionExecutor from './SectionExecutor.js';
 

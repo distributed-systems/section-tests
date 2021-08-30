@@ -17,7 +17,7 @@ A beautiful, extensible and lightweight async test framework.
 **2. Add test command to your package.json file**
 
     "scripts": {
-        "test": "node --experimental-modules ./node_modules/.bin/section ./test/**/*.mjs"
+        "test": "node ./node_modules/.bin/section ./test/**/*.js"
     },
 
 You may use [glob](https://www.npmjs.com/package/glob) patterns for defining the files 

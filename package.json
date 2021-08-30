@@ -24,12 +24,15 @@
   },
   "homepage": "https://github.com/distributed-systems/section-tests#readme",
   "dependencies": {
-    "@distributed-systems/callsite": "^1.1.1",
+    "@distributed-systems/callsite": "^3.0.0",
     "@distributed-systems/glob": "^2.0.1",
     "@distributed-systems/types": "^2.0.1"
   },
   "bin": {
-    "section": "./bin/run.js"
+    "section": "./bin/run-npm.js"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "ee-log": "^3.0.9"
+  }
 }

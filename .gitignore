@@ -24,3 +24,5 @@ config.local.js
 
 
 coverage
+
+es-modules

@@ -1,6 +1,6 @@
 {
   "name": "section-tests",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "TDD for node.js",
   "main": "npm/index.js",
   "scripts": {

@@ -4,7 +4,7 @@
   "description": "TDD for node.js",
   "main": "npm/index.js",
   "scripts": {
-    "test": "node --experimental-modules ./bin/run.mjs ./test/*.js"
+    "test": "node --experimental-modules ./bin/run.js ./test/*.js"
   },
   "repository": {
     "type": "git",

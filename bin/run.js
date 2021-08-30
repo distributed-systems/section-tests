@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import TestRunner from '../src/TestRunner.js';
+import TestRunner from '../npm/src/TestRunner.js';
 import path from 'path';
 
 
@@ -16,7 +16,6 @@ process.on('unhandledRejection', (err, p) => {
 
 
 process.on('uncaughtException', console.trace);
-
 
 
 

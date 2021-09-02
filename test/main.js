@@ -14,6 +14,7 @@ section('Libraries', {timeout: 6000}, (section) => {
     section('Venue', (section) => {
         section.test('findByZip', async () => {
             //log('testing');
+            section.warn('pay attention, there stuff happening ...');
             assert.equal('3', 2, 'not equal, dude!');
         });
 
@@ -53,6 +54,7 @@ section('Libraries', {timeout: 6000}, (section) => {
 
     section('Timeout', (section) => {
         section.test('should timeout', () => {
+            section.warn('pay attention, there stuff happening ...');
             section.setTimeout(300);
             return new Promise(() => {
                 setTimeout(() => {}, 3000);
@@ -77,7 +79,9 @@ section('Libraries', {timeout: 6000}, (section) => {
 
     section('Event', (section) => {
         section.test('create', async () => {
-            //log('testing');
+            section.warn('pay attention, there stuff happening ...');
+            section.info('creating things ..');
+            section.info('updating things ....');
             
         });
 

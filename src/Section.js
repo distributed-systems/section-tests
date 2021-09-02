@@ -72,7 +72,7 @@ class Section {
 
     getTransports() {
         return this.collectTransports();
-    }
+    }   
 
 
 
@@ -129,6 +129,8 @@ class Section {
         iface.setup = this.setup.bind(this);
         iface.destroy = this.destroy.bind(this);
         iface.execute = this.execute.bind(this);
+        iface.getDepth = this.getDepth.bind(this);
+        iface.getTransports = this.getTransports.bind(this);
         iface.use = this.use.bind(this);
         iface.continue = this.continueSection.bind(this);
 
@@ -168,7 +170,7 @@ class Section {
     async execute() {
         const section = this;
         const executor = new SectionExecutor({section});
-        await executor.execute();
+        return await executor.execute();
     }
 
 

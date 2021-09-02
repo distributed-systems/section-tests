@@ -184,9 +184,9 @@ export default class SpecReporter {
             }
 
             this.padAmount = 0;
-            console.log(`\n\n${this.pad(2)}${chalk.yellow(`${message.failed} / ${message.ok + message.failed} tests failed!`)}`);
+            console.log(`\n\n${this.pad(2)}${chalk.yellow(`${message.failed} / ${message.ok + message.failed} tests failed!`)}\n\n`);
         } else {
-            console.log(`\n\n${this.pad(2)}${chalk.green.bold(`${message.ok + message.failed} tests succeeded!`)}`);
+            console.log(`\n\n${this.pad(2)}${chalk.green.bold(`${message.ok + message.failed} tests executed sucessfully 😊`)}\n\n`);
         }
     }
 

@@ -121,7 +121,7 @@ class Section {
     getInterface() {
 
         // return a function that can be invoked by the user
-        const iface = this.createSection.bind(this);
+        const iface = this.continueSection.bind(this);
 
 
         // expose some methods

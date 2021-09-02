@@ -33,6 +33,7 @@ export default class SectionExecutor {
 
 
     async execute() {
+        const result = { ok: 0, failed: 0 };
 
         // send the section message
         const section = this.section;
@@ -43,9 +44,14 @@ export default class SectionExecutor {
         const err = await this.executeSetups();
         if (err) process.exit(1);
 
-        await this.executeTests();
-        await this.executeSubSections();
+        const results = await this.executeTests();
+        const subResults = await this.executeSubSections();
         await this.executeDestroyers();
+
+        result.ok += (results.ok + subResults.ok);
+        result.failed += (results.failed + subResults.failed);
+
+        return result;
     }
 
 
@@ -100,12 +106,19 @@ export default class SectionExecutor {
 
 
     async executeSubSections() {
+        const result = { ok: 0, failed: 0 };
+
         for (const sectionList of this.section.childSections.values()) {
             for (const section of sectionList) {
                 const subExecutor = new SectionExecutor({section});
-                await subExecutor.execute();
+                const { ok, failed } = await subExecutor.execute();
+
+                result.ok += ok;
+                result.failed += failed;
             }
         }
+
+        return result;
     }
 
 
@@ -116,6 +129,7 @@ export default class SectionExecutor {
 
 
     async executeTests() {
+        const result = { ok: 0, failed: 0 };
         const section = this.section;
 
         for (const test of section.tests.values()) {
@@ -172,6 +186,8 @@ export default class SectionExecutor {
                 const errorMessage = new TestErrorMessage({err, test, section, duration});
                 this.sendMessage(errorMessage);
 
+                result.failed++;
+
                 // skip to next test
                 continue;
             }
@@ -181,7 +197,11 @@ export default class SectionExecutor {
             const duration = Date.now() - start;
             const successMessage = new TestSuccessMessage({test, section, duration});
             this.sendMessage(successMessage);
+
+            result.ok++;
         }
+
+        return result;
     }
 
 

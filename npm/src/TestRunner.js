@@ -2,6 +2,7 @@ import section from'../index.js';
 import glob from '@distributed-systems/glob/src/glob.js';
 import { exec } from 'child_process';
 import path from 'path';
+import TestSuiteEndMessage from './message/TestSuiteEndMessage.js'
 
 
 
@@ -24,9 +25,22 @@ export default class TestRunner {
      * @return     {Promise} 
      */
     async execute() {
+        const start = Date.now();
+
         await this.resolvePatterns();
         await this.loadFiles();
-        await section.execute();
+        const { ok, failed } = await section.execute();
+
+        const message = new TestSuiteEndMessage({
+            duration: Date.now() - start,
+            ok,
+            failed,
+            section,
+        });
+
+        // tell that we're finished
+        const transports = section.getTransports();
+        transports.forEach((transport) => transport.send(message));
     }
 
 

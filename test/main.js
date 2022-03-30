@@ -127,6 +127,13 @@ section('Tools', (section) => {
 });
 
 
+section('Errors', (section) => {
+    section.test('print out errors neatly', async () => {
+        throw new Error('this is an error');
+    });
+});
+
+
 
 
 section.setup('Setting things up', () => {

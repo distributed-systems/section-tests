@@ -1,0 +1,1 @@
+{"version":3,"file":"DestroyerErrorMessage.js","sourceRoot":"","sources":["../../../src/message/DestroyerErrorMessage.ts"],"names":[],"mappings":"AAAA,OAAO,YAAqC,MAAM,mBAAmB,CAAC;AAMtE,MAAM,CAAC,OAAO,OAAO,qBAAsB,SAAQ,YAAY;IAG3D,YAAY,OAAqC;QAC7C,KAAK,CAAC,OAAO,CAAC,CAAC;QAEf,IAAI,CAAC,IAAI,GAAG,OAAO,CAAC,IAAI,CAAC;QACzB,IAAI,CAAC,IAAI,GAAG,uBAAuB,CAAC;IACxC,CAAC;CACJ"}

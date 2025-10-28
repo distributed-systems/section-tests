@@ -1,0 +1,1 @@
+{"version":3,"file":"SetupSuccessMessage.js","sourceRoot":"","sources":["../../../src/message/SetupSuccessMessage.ts"],"names":[],"mappings":"AAAA,OAAO,cAAyC,MAAM,qBAAqB,CAAC;AAM5E,MAAM,CAAC,OAAO,OAAO,mBAAoB,SAAQ,cAAc;IAG3D,YAAY,OAAmC;QAC3C,KAAK,CAAC,OAAO,CAAC,CAAC;QAEf,IAAI,CAAC,IAAI,GAAG,OAAO,CAAC,IAAI,CAAC;QACzB,IAAI,CAAC,IAAI,GAAG,qBAAqB,CAAC;IACtC,CAAC;CACJ"}

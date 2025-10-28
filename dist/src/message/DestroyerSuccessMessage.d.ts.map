@@ -1,0 +1,1 @@
+{"version":3,"file":"DestroyerSuccessMessage.d.ts","sourceRoot":"","sources":["../../../src/message/DestroyerSuccessMessage.ts"],"names":[],"mappings":"AAAA,OAAO,cAAc,EAAE,EAAE,qBAAqB,EAAE,MAAM,qBAAqB,CAAC;AAE5E,MAAM,WAAW,8BAA+B,SAAQ,qBAAqB;IACzE,IAAI,EAAE,MAAM,CAAC;CAChB;AAED,MAAM,CAAC,OAAO,OAAO,uBAAwB,SAAQ,cAAc;IAC/D,IAAI,EAAE,MAAM,CAAC;gBAED,OAAO,EAAE,8BAA8B;CAMtD"}

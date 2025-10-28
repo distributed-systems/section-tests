@@ -1,0 +1,1 @@
+{"version":3,"file":"SetupStartMessage.js","sourceRoot":"","sources":["../../../src/message/SetupStartMessage.ts"],"names":[],"mappings":"AAAA,OAAO,OAA2B,MAAM,cAAc,CAAC;AAMvD,MAAM,CAAC,OAAO,OAAO,iBAAkB,SAAQ,OAAO;IAGlD,YAAY,OAAiC;QACzC,KAAK,CAAC,OAAO,CAAC,CAAC;QAEf,IAAI,CAAC,IAAI,GAAG,OAAO,CAAC,IAAI,CAAC;QACzB,IAAI,CAAC,IAAI,GAAG,mBAAmB,CAAC;IACpC,CAAC;CACJ"}

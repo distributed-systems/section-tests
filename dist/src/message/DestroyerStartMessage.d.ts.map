@@ -1,0 +1,1 @@
+{"version":3,"file":"DestroyerStartMessage.d.ts","sourceRoot":"","sources":["../../../src/message/DestroyerStartMessage.ts"],"names":[],"mappings":"AAAA,OAAO,OAAO,EAAE,EAAE,cAAc,EAAE,MAAM,cAAc,CAAC;AAEvD,MAAM,WAAW,4BAA6B,SAAQ,cAAc;IAChE,IAAI,EAAE,MAAM,CAAC;CAChB;AAED,MAAM,CAAC,OAAO,OAAO,qBAAsB,SAAQ,OAAO;IACtD,IAAI,EAAE,MAAM,CAAC;gBAED,OAAO,EAAE,4BAA4B;CAMpD"}

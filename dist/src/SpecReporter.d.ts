@@ -1,0 +1,44 @@
+import { MessageType } from './types.js';
+import type Message from './message/Message.js';
+import type LogMessage from './message/LogMessage.js';
+import type TestStartMessage from './message/TestStartMessage.js';
+import type TestSuccessMessage from './message/TestSuccessMessage.js';
+import type TestErrorMessage from './message/TestErrorMessage.js';
+import type SetupStartMessage from './message/SetupStartMessage.js';
+import type SetupSuccessMessage from './message/SetupSuccessMessage.js';
+import type SetupErrorMessage from './message/SetupErrorMessage.js';
+import type DestroyerStartMessage from './message/DestroyerStartMessage.js';
+import type DestroyerSuccessMessage from './message/DestroyerSuccessMessage.js';
+import type DestroyerErrorMessage from './message/DestroyerErrorMessage.js';
+import type TestSuiteEndMessage from './message/TestSuiteEndMessage.js';
+import type SectionMessage from './message/SectionMessage.js';
+export default class SpecReporter {
+    failedStacks: MessageType[][];
+    currentSectionTree: SectionMessage[];
+    cachedMessages: MessageType[];
+    lastStartMessage?: MessageType | null;
+    padAmount: number;
+    lastType?: string;
+    constructor();
+    send(message: MessageType): void;
+    getCurrentSectionTree(): SectionMessage[];
+    processMessage(message: MessageType): void;
+    displayMessages(messages: MessageType[]): void;
+    displayCachedMessages(): void;
+    displayMessage(message: MessageType): void;
+    displayTestSuiteEndMessage(message: TestSuiteEndMessage): void;
+    displayLogMessage(message: LogMessage): void;
+    displaySetupStartMessage(message: SetupStartMessage): void;
+    displaySetupErrorMessage(message: SetupErrorMessage): void;
+    displaySetupSuccessMessage(message: SetupSuccessMessage): void;
+    displayTestStartMessage(message: TestStartMessage): void;
+    displayTestSuccessMessage(message: TestSuccessMessage): void;
+    displayTestErrorMessage(message: TestErrorMessage): void;
+    getDurationMark(message: Message): string;
+    displayDestroyerStartMessage(message: DestroyerStartMessage): void;
+    displayDestroyerErrorMessage(message: DestroyerErrorMessage): void;
+    displayDestroyerSuccessMessage(message: DestroyerSuccessMessage): void;
+    displaySectionMessage(message: SectionMessage): void;
+    pad(add?: number): string;
+}
+//# sourceMappingURL=SpecReporter.d.ts.map

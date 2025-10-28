@@ -1,0 +1,1 @@
+{"version":3,"file":"SetupErrorMessage.d.ts","sourceRoot":"","sources":["../../../src/message/SetupErrorMessage.ts"],"names":[],"mappings":"AAAA,OAAO,YAAY,EAAE,EAAE,mBAAmB,EAAE,MAAM,mBAAmB,CAAC;AAEtE,MAAM,WAAW,wBAAyB,SAAQ,mBAAmB;IACjE,IAAI,EAAE,MAAM,CAAC;CAChB;AAED,MAAM,CAAC,OAAO,OAAO,iBAAkB,SAAQ,YAAY;IACvD,IAAI,EAAE,MAAM,CAAC;gBAED,OAAO,EAAE,wBAAwB;CAMhD"}

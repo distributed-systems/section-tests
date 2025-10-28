@@ -1,0 +1,1 @@
+{"version":3,"file":"TestStartMessage.js","sourceRoot":"","sources":["../../../src/message/TestStartMessage.ts"],"names":[],"mappings":"AAAA,OAAO,OAA2B,MAAM,cAAc,CAAC;AAQvD,MAAM,CAAC,OAAO,OAAO,gBAAiB,SAAQ,OAAO;IAGjD,YAAY,OAAgC;QACxC,KAAK,CAAC,OAAO,CAAC,CAAC;QAEf,IAAI,CAAC,IAAI,GAAG,OAAO,CAAC,IAAI,CAAC;QACzB,IAAI,CAAC,IAAI,GAAG,kBAAkB,CAAC;IACnC,CAAC;CACJ"}

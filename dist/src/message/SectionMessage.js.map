@@ -1,0 +1,1 @@
+{"version":3,"file":"SectionMessage.js","sourceRoot":"","sources":["../../../src/message/SectionMessage.ts"],"names":[],"mappings":"AAAA,OAAO,OAA2B,MAAM,cAAc,CAAC;AAEvD,MAAM,CAAC,OAAO,OAAO,cAAe,SAAQ,OAAO;IAC/C,YAAY,OAAuB;QAC/B,KAAK,CAAC,OAAO,CAAC,CAAC;QACf,IAAI,CAAC,IAAI,GAAG,gBAAgB,CAAC;IACjC,CAAC;CACJ"}

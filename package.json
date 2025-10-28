@@ -2,9 +2,13 @@
   "name": "section-tests",
   "version": "3.2.1",
   "description": "TDD for node.js",
-  "main": "npm/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "node --experimental-modules ./bin/run.js ./test/*.js"
+    "build": "tsc && cp -r src/lib/*.js dist/src/lib/",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node dist/bin/run.js dist/test/main.js",
+    "test:watch": "tsc --watch"
   },
   "repository": {
     "type": "git",
@@ -24,15 +28,23 @@
   },
   "homepage": "https://github.com/distributed-systems/section-tests#readme",
   "dependencies": {
-    "@distributed-systems/callsite": "^3.0.0",
-    "@distributed-systems/glob": "^2.0.1",
-    "@distributed-systems/types": "^2.0.1"
+    "@distributed-systems/callsite": "^4.0.0",
+    "@distributed-systems/glob": "^3.0.0",
+    "@distributed-systems/types": "^3.0.0"
   },
   "bin": {
-    "section": "./bin/run-npm.js"
+    "section": "./dist/bin/run-npm.js"
   },
   "type": "module",
   "devDependencies": {
-    "ee-log": "^3.0.9"
-  }
+    "@tsconfig/node22": "^22.0.2",
+    "@types/node": "^24.9.1",
+    "ee-log": "^3.0.9",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
 }

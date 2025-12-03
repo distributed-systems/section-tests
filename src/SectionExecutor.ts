@@ -107,7 +107,12 @@ export default class SectionExecutor {
         const result: ExecutionResult = { ok: 0, failed: 0 };
         const section = this.section;
 
-        for (const test of section.tests.values()) {
+        // Check if any tests are marked with .only()
+        const testsArray = Array.from(section.tests.values());
+        const onlyTests = testsArray.filter(test => test.only);
+        const testsToExecute = onlyTests.length > 0 ? onlyTests : testsArray;
+
+        for (const test of testsToExecute) {
             const start = Date.now();
 
             this.sendMessage(new TestStartMessage({start, test, section}));

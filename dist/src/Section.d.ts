@@ -1,4 +1,4 @@
-import { SectionInterface, SectionOptions, Test, Setup, Destroyer, Transport, ExecutionResult } from './types.js';
+import { SectionInterface, SectionOptions, Test, Setup, Destroyer, Transport, ExecutionResult, TestChainable } from './types.js';
 interface SectionConstructorOptions {
     parent?: Section;
     name?: string;
@@ -44,7 +44,7 @@ declare class Section {
     wait(msecs: number): Promise<void>;
     execute(): Promise<ExecutionResult>;
     use(transport: Transport): void;
-    test(...params: any[]): void;
+    test(...params: any[]): TestChainable;
     setup(...params: any[]): void;
     destroy(...params: any[]): void;
     getRoot(): Section;

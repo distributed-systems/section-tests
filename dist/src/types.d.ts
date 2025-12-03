@@ -22,11 +22,14 @@ export interface SectionInterface {
 export interface SectionOptions {
     [key: string]: any;
 }
+export interface TestChainable {
+    only: () => void;
+}
 export interface TestFunction {
-    (name: string, fn: () => void | Promise<void>): void;
-    (fn: () => void | Promise<void>): void;
-    (name: string, options: TestOptions, fn: () => void | Promise<void>): void;
-    (options: TestOptions, fn: () => void | Promise<void>): void;
+    (name: string, fn: () => void | Promise<void>): TestChainable;
+    (fn: () => void | Promise<void>): TestChainable;
+    (name: string, options: TestOptions, fn: () => void | Promise<void>): TestChainable;
+    (options: TestOptions, fn: () => void | Promise<void>): TestChainable;
 }
 export interface SetupFunction {
     (name: string, fn: () => void | Promise<void>): void;
@@ -49,6 +52,7 @@ export interface Test {
     name: string;
     executeTest: () => void | Promise<void>;
     options: TestOptions;
+    only?: boolean;
 }
 export interface Setup {
     name: string;

@@ -126,7 +126,14 @@ class Section {
             else
                 throw new Error(`Invalid option at position ${index}!`);
         });
-        this.tests.add({ name, executeTest: executeTest, options });
+        const test = { name, executeTest: executeTest, options };
+        this.tests.add(test);
+        // Return chainable object with only() method
+        return {
+            only: () => {
+                test.only = true;
+            }
+        };
     }
     setup(...params) {
         let executeSetup;

@@ -93,14 +93,14 @@ export default class SectionExecutor {
         const section = this.section;
         const message = new SectionMessage({ section });
         this.sendMessage(message);
-        const err = await this.executeSetups();
-        if (err)
+        const setupResult = await this.executeSetups();
+        if (setupResult.error)
             process.exit(1);
         const results = await this.executeTests();
         const subResults = await this.executeSubSections();
-        await this.executeDestroyers();
+        const destroyerFailed = await this.executeDestroyers();
         result.ok += (results.ok + subResults.ok);
-        result.failed += (results.failed + subResults.failed);
+        result.failed += (results.failed + subResults.failed + setupResult.failed + destroyerFailed);
         return result;
     }
     /**
@@ -197,6 +197,7 @@ export default class SectionExecutor {
     }
     async executeDestroyers() {
         const section = this.section;
+        let failed = 0;
         for (const destroyer of section.destroyers.values()) {
             const start = Date.now();
             const name = destroyer.name;
@@ -213,6 +214,7 @@ export default class SectionExecutor {
                 const duration = Date.now() - start;
                 const errorMessage = new DestroyerErrorMessage({ err, section, duration, name, test: undefined });
                 this.sendMessage(errorMessage);
+                failed++;
                 // skip to next destroyer
                 continue;
             }
@@ -225,9 +227,11 @@ export default class SectionExecutor {
             const successMessage = new DestroyerSuccessMessage({ section, duration, name, test: undefined });
             this.sendMessage(successMessage);
         }
+        return failed;
     }
     async executeSetups() {
         const section = this.section;
+        let failed = 0;
         for (const setup of section.setups.values()) {
             const start = Date.now();
             const name = setup.name;
@@ -244,8 +248,9 @@ export default class SectionExecutor {
                 const duration = Date.now() - start;
                 const errorMessage = new SetupErrorMessage({ err, section, duration, name, test: undefined });
                 this.sendMessage(errorMessage);
+                failed++;
                 // skip to next setup
-                return err;
+                return { error: err, failed };
             }
             finally {
                 section.resetTimeoutTime();
@@ -256,7 +261,7 @@ export default class SectionExecutor {
             const successMessage = new SetupSuccessMessage({ section, duration, name, test: undefined });
             this.sendMessage(successMessage);
         }
-        return undefined;
+        return { failed };
     }
     sendMessage(message) {
         const transports = this.section.getTransports();

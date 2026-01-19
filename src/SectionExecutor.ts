@@ -116,15 +116,15 @@ export default class SectionExecutor {
         const message = new SectionMessage({section});
         this.sendMessage(message);
 
-        const err = await this.executeSetups();
-        if (err) process.exit(1);
+        const setupResult = await this.executeSetups();
+        if (setupResult.error) process.exit(1);
 
         const results = await this.executeTests();
         const subResults = await this.executeSubSections();
-        await this.executeDestroyers();
+        const destroyerFailed = await this.executeDestroyers();
 
         result.ok += (results.ok + subResults.ok);
-        result.failed += (results.failed + subResults.failed);
+        result.failed += (results.failed + subResults.failed + setupResult.failed + destroyerFailed);
 
         return result;
     }
@@ -241,8 +241,9 @@ export default class SectionExecutor {
         this.sendMessage(new LogMessage(options));
     }
 
-    async executeDestroyers(): Promise<void> {
+    async executeDestroyers(): Promise<number> {
         const section = this.section;
+        let failed = 0;
 
         for (const destroyer of section.destroyers.values()) {
             const start = Date.now();
@@ -263,6 +264,8 @@ export default class SectionExecutor {
                 const errorMessage = new DestroyerErrorMessage({err, section, duration, name, test: undefined});
                 this.sendMessage(errorMessage);
 
+                failed++;
+
                 // skip to next destroyer
                 continue;
             } finally {
@@ -275,10 +278,13 @@ export default class SectionExecutor {
             const successMessage = new DestroyerSuccessMessage({section, duration, name, test: undefined});
             this.sendMessage(successMessage);
         }
+
+        return failed;
     }
 
-    async executeSetups(): Promise<ErrorData | undefined> {
+    async executeSetups(): Promise<{ error?: ErrorData; failed: number }> {
         const section = this.section;
+        let failed = 0;
 
         for (const setup of section.setups.values()) {
             const start = Date.now();
@@ -299,8 +305,10 @@ export default class SectionExecutor {
                 const errorMessage = new SetupErrorMessage({err, section, duration, name, test: undefined});
                 this.sendMessage(errorMessage);
 
+                failed++;
+
                 // skip to next setup
-                return err;
+                return { error: err, failed };
             } finally {
                 section.resetTimeoutTime();
                 section.sendLog = null;
@@ -312,7 +320,7 @@ export default class SectionExecutor {
             this.sendMessage(successMessage);
         }
 
-        return undefined;
+        return { failed };
     }
 
     sendMessage(message: MessageType): void {

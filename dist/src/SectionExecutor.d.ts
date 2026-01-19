@@ -28,8 +28,11 @@ export default class SectionExecutor {
     executeSubSections(): Promise<ExecutionResult>;
     executeTests(): Promise<ExecutionResult>;
     sendLogMessage(options: LogOptions): void;
-    executeDestroyers(): Promise<void>;
-    executeSetups(): Promise<ErrorData | undefined>;
+    executeDestroyers(): Promise<number>;
+    executeSetups(): Promise<{
+        error?: ErrorData;
+        failed: number;
+    }>;
     sendMessage(message: MessageType): void;
 }
 export {};

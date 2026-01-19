@@ -2,6 +2,7 @@ import section from '../index.js';
 import glob from '@distributed-systems/glob';
 import { exec } from 'child_process';
 import TestSuiteEndMessage from './message/TestSuiteEndMessage.js';
+import SpecReporter from './SpecReporter.js';
 
 interface TestRunnerOptions {
     patterns: string[];
@@ -25,6 +26,10 @@ export default class TestRunner {
 
         await this.resolvePatterns();
         await this.loadFiles();
+        if (section.getTransports().length === 0) {
+            console.error('No reporter registered. Registering SpecReporter.');
+            section.use(new SpecReporter());
+        }
         const { ok, failed } = await section.execute();
 
         const message = new TestSuiteEndMessage({

@@ -110,6 +110,10 @@ class Section {
         return await executor.execute();
     }
     use(transport) {
+        if (this.transports.has(transport)) {
+            console.warn('Reporter already registered, skipping duplicate registration.');
+            return;
+        }
         this.transports.add(transport);
     }
     test(...params) {

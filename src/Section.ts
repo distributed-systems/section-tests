@@ -155,6 +155,11 @@ class Section {
     }
 
     use(transport: Transport): void {
+        if (this.transports.has(transport)) {
+            console.warn('Reporter already registered, skipping duplicate registration.');
+            return;
+        }
+
         this.transports.add(transport);
     }
 

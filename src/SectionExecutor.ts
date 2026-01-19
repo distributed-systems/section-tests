@@ -33,6 +33,81 @@ export default class SectionExecutor {
         this.callsite = new Callsite();
     }
 
+    normalizeProcessError(err: unknown): Error {
+        if (err instanceof Error) return err;
+        if (typeof err === 'string') return new Error(err);
+        if (err && typeof err === 'object') {
+            try {
+                return new Error(JSON.stringify(err));
+            } catch {
+                return new Error('Unknown error');
+            }
+        }
+
+        return new Error(String(err));
+    }
+
+    async runWithTimeout(execute: () => void | Promise<void>, timeoutTime: number, timeoutMessage: string): Promise<void> {
+        let result: void | Promise<void>;
+
+        try {
+            result = execute();
+        } catch (err) {
+            throw err;
+        }
+
+        if (!type.promise(result)) return;
+
+        let timeoutEncountered = false;
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                timeoutEncountered = true;
+                reject(new Error(timeoutMessage));
+            }, timeoutTime);
+
+            (result as Promise<void>).then(() => {
+                clearTimeout(timeout);
+                if (!timeoutEncountered) resolve();
+            }).catch((err: any) => {
+                clearTimeout(timeout);
+                if (!timeoutEncountered) reject(err);
+            });
+        });
+    }
+
+    async runWithGuards(execute: () => void | Promise<void>, timeoutTime: number, timeoutMessage: string): Promise<void> {
+        let finished = false;
+        let rejectUnexpected: (err: Error) => void = () => undefined;
+
+        const unexpectedError = new Promise<void>((_resolve, reject) => {
+            rejectUnexpected = reject;
+        });
+
+        const handleUnhandledRejection = (reason: unknown) => {
+            if (finished) return;
+            rejectUnexpected(this.normalizeProcessError(reason));
+        };
+
+        const handleUncaughtException = (err: Error) => {
+            if (finished) return;
+            rejectUnexpected(this.normalizeProcessError(err));
+        };
+
+        process.once('unhandledRejection', handleUnhandledRejection);
+        process.once('uncaughtException', handleUncaughtException);
+
+        const runPromise = this.runWithTimeout(execute, timeoutTime, timeoutMessage);
+
+        try {
+            await Promise.race([runPromise, unexpectedError]);
+        } finally {
+            finished = true;
+            process.removeListener('unhandledRejection', handleUnhandledRejection);
+            process.removeListener('uncaughtException', handleUncaughtException);
+            await runPromise.catch(() => undefined);
+        }
+    }
+
     async execute(): Promise<ExecutionResult> {
         const result: ExecutionResult = { ok: 0, failed: 0 };
 
@@ -123,40 +198,14 @@ export default class SectionExecutor {
                 section.sendLog = (message: string, level: string) => this.sendLogMessage({section, message, level});
 
                 // run the test
-                await new Promise<void>((resolve, reject) => {
-                    
-                    // make sure to not call the test as property of the test object.
-                    // that may generate weird stack traces
-                    const { executeTest } = test;
-                    const testPromise = executeTest();
+                // make sure to not call the test as property of the test object.
+                // that may generate weird stack traces
+                const { executeTest } = test;
 
-                    if (!type.promise(testPromise)) resolve();
-                    else {
+                const timeoutTime = section.getTimeoutTime();
+                const timeoutMessage = `The test encountered a timeout after ${timeoutTime} milliseconds. Use section.setTimeout(msec) to increase the timeout time`;
 
-                        // let tests time out
-                        let timeoutEncountered = false;
-                        const timeoutTime = section.getTimeoutTime();
-                        const timeout = setTimeout(() => {
-                            timeoutEncountered = true;
-                            reject(new Error(`The test encountered a timeout after ${timeoutTime} milliseconds. Use section.setTimeout(msec) to increase the timeout time`));
-                        }, timeoutTime);
-
-                        // reset the timeout for the next test
-                        section.resetTimeoutTime();
-
-                        // run the actual test
-                        (testPromise as Promise<void>).then(() => {
-                            clearTimeout(timeout);
-                            if (!timeoutEncountered) resolve();
-                        }).catch((err: any) => {
-                            clearTimeout(timeout);
-                            if (!timeoutEncountered) reject(err);
-                        });
-                    }
-                });
-
-                // stop accepting log messages from the current test
-                section.sendLog = null;
+                await this.runWithGuards(executeTest, timeoutTime, timeoutMessage);
             } catch (e) {
                 
                 // send the error message
@@ -169,6 +218,12 @@ export default class SectionExecutor {
 
                 // skip to next test
                 continue;
+            } finally {
+                // reset the timeout for the next test
+                section.resetTimeoutTime();
+
+                // stop accepting log messages from the current test
+                section.sendLog = null;
             }
 
             // send success message
@@ -197,8 +252,9 @@ export default class SectionExecutor {
 
             try {
                 section.sendLog = (message: string, level: string) => this.sendLogMessage({section, message, level});
-                await destroyer.executeDestroy();
-                section.sendLog = null;
+                const timeoutTime = section.getTimeoutTime();
+                const timeoutMessage = `The destroyer encountered a timeout after ${timeoutTime} milliseconds. Use section.setTimeout(msec) to increase the timeout time`;
+                await this.runWithGuards(destroyer.executeDestroy, timeoutTime, timeoutMessage);
             } catch (e) {
 
                 // send the error message
@@ -209,6 +265,9 @@ export default class SectionExecutor {
 
                 // skip to next destroyer
                 continue;
+            } finally {
+                section.resetTimeoutTime();
+                section.sendLog = null;
             }
 
             // send success message
@@ -229,8 +288,9 @@ export default class SectionExecutor {
 
             try {
                 section.sendLog = (message: string, level: string) => this.sendLogMessage({section, message, level});
-                await setup.executeSetup();
-                section.sendLog = null;
+                const timeoutTime = section.getTimeoutTime();
+                const timeoutMessage = `The setup encountered a timeout after ${timeoutTime} milliseconds. Use section.setTimeout(msec) to increase the timeout time`;
+                await this.runWithGuards(setup.executeSetup, timeoutTime, timeoutMessage);
             } catch (e) {
 
                 // send the error message
@@ -241,6 +301,9 @@ export default class SectionExecutor {
 
                 // skip to next setup
                 return err;
+            } finally {
+                section.resetTimeoutTime();
+                section.sendLog = null;
             }
 
             // send success message

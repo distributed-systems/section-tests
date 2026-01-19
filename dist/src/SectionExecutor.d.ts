@@ -13,6 +13,9 @@ export default class SectionExecutor {
     section: Section;
     callsite: Callsite;
     constructor({ section }: SectionExecutorOptions);
+    normalizeProcessError(err: unknown): Error;
+    runWithTimeout(execute: () => void | Promise<void>, timeoutTime: number, timeoutMessage: string): Promise<void>;
+    runWithGuards(execute: () => void | Promise<void>, timeoutTime: number, timeoutMessage: string): Promise<void>;
     execute(): Promise<ExecutionResult>;
     /**
     * converts an error object to a transportable standard error

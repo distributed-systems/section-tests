@@ -42,6 +42,10 @@ export default class TestRunner {
         // tell that we're finished
         const transports = section.getTransports();
         transports.forEach((transport) => transport.send(message));
+
+        // ensure we exit after suite completion to avoid hanging processes
+        const exitCode = failed > 0 ? 1 : 0;
+        setImmediate(() => process.exit(exitCode));
     }
 
     /**

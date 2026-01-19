@@ -32,7 +32,7 @@ export default class TestRunner {
         transports.forEach((transport) => transport.send(message));
         // ensure we exit after suite completion to avoid hanging processes
         const exitCode = failed > 0 ? 1 : 0;
-        setImmediate(() => process.exit(exitCode));
+        setTimeout(() => process.exit(exitCode), 150);
     }
     /**
      * resolve the user provided patterns using the glob library

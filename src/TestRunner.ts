@@ -45,7 +45,7 @@ export default class TestRunner {
 
         // ensure we exit after suite completion to avoid hanging processes
         const exitCode = failed > 0 ? 1 : 0;
-        setImmediate(() => process.exit(exitCode));
+        setTimeout(() => process.exit(exitCode), 150);
     }
 
     /**

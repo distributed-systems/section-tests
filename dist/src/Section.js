@@ -16,6 +16,7 @@ class Section {
         this.setups = new Set();
         this.destroyers = new Set();
         this.transports = new Set();
+        this.transportTypes = new Set();
     }
     /**
     * the user may set a custom timeout time
@@ -110,10 +111,12 @@ class Section {
         return await executor.execute();
     }
     use(transport) {
-        if (this.transports.has(transport)) {
-            console.warn('Reporter already registered, skipping duplicate registration.');
+        const transportType = transport?.constructor || transport;
+        if (this.transportTypes.has(transportType)) {
+            console.warn('Reporter type already registered, skipping duplicate registration.');
             return;
         }
+        this.transportTypes.add(transportType);
         this.transports.add(transport);
     }
     test(...params) {

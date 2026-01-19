@@ -29,6 +29,7 @@ class Section {
     setups: Set<Setup>;
     destroyers: Set<Destroyer>;
     transports: Set<Transport>;
+    transportTypes: Set<any>;
     sendLog?: ((message: string, level: string) => void) | null;
 
     constructor({parent, name = 'root', options = {}}: SectionConstructorOptions = {}) {
@@ -45,6 +46,7 @@ class Section {
         this.setups = new Set();
         this.destroyers = new Set();
         this.transports = new Set();
+        this.transportTypes = new Set();
     }
 
     /**
@@ -155,11 +157,14 @@ class Section {
     }
 
     use(transport: Transport): void {
-        if (this.transports.has(transport)) {
-            console.warn('Reporter already registered, skipping duplicate registration.');
+        const transportType = (transport as any)?.constructor || transport;
+
+        if (this.transportTypes.has(transportType)) {
+            console.warn('Reporter type already registered, skipping duplicate registration.');
             return;
         }
 
+        this.transportTypes.add(transportType);
         this.transports.add(transport);
     }
 

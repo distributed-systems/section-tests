@@ -14,6 +14,7 @@ declare class Section {
     setups: Set<Setup>;
     destroyers: Set<Destroyer>;
     transports: Set<Transport>;
+    transportTypes: Set<any>;
     sendLog?: ((message: string, level: string) => void) | null;
     constructor({ parent, name, options }?: SectionConstructorOptions);
     /**

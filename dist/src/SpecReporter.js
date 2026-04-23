@@ -86,7 +86,7 @@ function readSectionTestsVersion() {
     }
     return cachedPackageVersion;
 }
-export default class SpecReporter {
+class SpecReporter {
     constructor({ interactive, output = process.stdout, renderIntervalMs = 50, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream, {
         defaultWidth: resolveLogUpdateWidth(stream),
         defaultHeight: resolveLogUpdateHeight(stream),
@@ -96,6 +96,8 @@ export default class SpecReporter {
         this.workerIdToSlot = new Map();
         this.renderTimer = null;
         this.bufferedTestLogs = [];
+        this.totalTestsPlanned = 0;
+        this.testsFinished = 0;
         this.output = output;
         this.interactive = interactive ?? Boolean(output.isTTY);
         this.renderer = this.interactive ? createRenderer(this.output) : null;
@@ -127,6 +129,8 @@ export default class SpecReporter {
         this.records.clear();
         this.slotStates.clear();
         this.workerIdToSlot.clear();
+        this.totalTestsPlanned = plan.tests.length;
+        this.testsFinished = 0;
         plan.tests.forEach((test) => {
             this.records.set(test.id, {
                 test,
@@ -134,6 +138,9 @@ export default class SpecReporter {
             });
         });
         this.printRunHeader();
+        if (this.interactive && this.totalTestsPlanned > 0) {
+            this.scheduleRender();
+        }
     }
     onEvent(event) {
         const record = this.records.get(event.testId);
@@ -198,6 +205,7 @@ export default class SpecReporter {
                 }
                 break;
             case 'test-finished':
+                this.testsFinished += 1;
                 record.status = event.status;
                 record.durationMs = event.durationMs;
                 record.prepareDurationMs = event.prepareDurationMs;
@@ -225,6 +233,7 @@ export default class SpecReporter {
     }
     onSummary(summary) {
         this.summary = summary;
+        this.testsFinished = summary.total;
         summary.records.forEach((finalRecord) => {
             const liveRecord = this.records.get(finalRecord.test.id);
             if (!liveRecord)
@@ -300,10 +309,25 @@ export default class SpecReporter {
             return;
         if (!this.renderer)
             return;
-        const lines = this.renderSlotLines();
+        const lines = [];
+        if (this.interactive && this.totalTestsPlanned > 0) {
+            lines.push(this.formatProgressLine());
+            lines.push('');
+        }
+        lines.push(...this.renderSlotLines());
         if (!lines.length)
             return;
         this.renderer(lines.join('\n'));
+    }
+    formatProgressLine() {
+        const total = this.totalTestsPlanned;
+        const done = this.testsFinished;
+        const cols = resolveLogUpdateWidth(this.output);
+        const barWidth = SpecReporter.progressBarWidth;
+        const filled = total === 0 ? 0 : Math.min(barWidth, Math.round((done / total) * barWidth));
+        const bar = chalk.cyan('█'.repeat(filled)) + chalk.cyan.dim('░'.repeat(barWidth - filled));
+        const raw = `  ${bar}  ${chalk.cyan(String(done))}${chalk.cyan.dim(`/${total}`)}`;
+        return truncateAnsiLineToWidth(raw, cols);
     }
     renderSlotLines() {
         const slots = Array.from(this.slotStates.values()).sort((left, right) => left.slot - right.slot);
@@ -520,4 +544,6 @@ export default class SpecReporter {
         return ' '.repeat(amount);
     }
 }
+SpecReporter.progressBarWidth = 80;
+export default SpecReporter;
 //# sourceMappingURL=SpecReporter.js.map

@@ -26,6 +26,8 @@ export default class SpecReporter implements Reporter {
     private renderTimer;
     private bufferedTestLogs;
     private readonly showTestLogs;
+    private totalTestsPlanned;
+    private testsFinished;
     constructor({ interactive, output, renderIntervalMs, workerSlots, createRenderer, showTestLogs, }?: SpecReporterOptions);
     setWorkerSlots(workerSlots: number): void;
     private printRunHeader;
@@ -37,6 +39,8 @@ export default class SpecReporter implements Reporter {
     private renderNow;
     private clearPendingRender;
     private renderInteractiveBoard;
+    private static readonly progressBarWidth;
+    private formatProgressLine;
     private renderSlotLines;
     private displayFinishedRecord;
     private printTestLog;

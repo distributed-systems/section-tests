@@ -161,6 +161,8 @@ export default class SpecReporter implements Reporter {
     private renderTimer: NodeJS.Timeout | null = null;
     private bufferedTestLogs: BufferedTestLog[] = [];
     private readonly showTestLogs: boolean;
+    private totalTestsPlanned = 0;
+    private testsFinished = 0;
 
     constructor({
         interactive,
@@ -209,6 +211,8 @@ export default class SpecReporter implements Reporter {
         this.records.clear();
         this.slotStates.clear();
         this.workerIdToSlot.clear();
+        this.totalTestsPlanned = plan.tests.length;
+        this.testsFinished = 0;
 
         plan.tests.forEach((test: CollectedTest) => {
             this.records.set(test.id, {
@@ -218,6 +222,9 @@ export default class SpecReporter implements Reporter {
         });
 
         this.printRunHeader();
+        if (this.interactive && this.totalTestsPlanned > 0) {
+            this.scheduleRender();
+        }
     }
 
     onEvent(event: TestEvent): void {
@@ -283,6 +290,7 @@ export default class SpecReporter implements Reporter {
                 }
                 break;
             case 'test-finished':
+                this.testsFinished += 1;
                 record.status = event.status;
                 record.durationMs = event.durationMs;
                 record.prepareDurationMs = event.prepareDurationMs;
@@ -312,6 +320,7 @@ export default class SpecReporter implements Reporter {
 
     onSummary(summary: TestRunSummary): void {
         this.summary = summary;
+        this.testsFinished = summary.total;
 
         summary.records.forEach((finalRecord) => {
             const liveRecord = this.records.get(finalRecord.test.id);
@@ -393,9 +402,27 @@ export default class SpecReporter implements Reporter {
         if (!this.plan) return;
         if (!this.renderer) return;
 
-        const lines = this.renderSlotLines();
+        const lines: string[] = [];
+        if (this.interactive && this.totalTestsPlanned > 0) {
+            lines.push(this.formatProgressLine());
+            lines.push('');
+        }
+        lines.push(...this.renderSlotLines());
         if (!lines.length) return;
         this.renderer(lines.join('\n'));
+    }
+
+    private static readonly progressBarWidth = 80;
+
+    private formatProgressLine(): string {
+        const total = this.totalTestsPlanned;
+        const done = this.testsFinished;
+        const cols = resolveLogUpdateWidth(this.output);
+        const barWidth = SpecReporter.progressBarWidth;
+        const filled = total === 0 ? 0 : Math.min(barWidth, Math.round((done / total) * barWidth));
+        const bar = chalk.cyan('█'.repeat(filled)) + chalk.cyan.dim('░'.repeat(barWidth - filled));
+        const raw = `  ${bar}  ${chalk.cyan(String(done))}${chalk.cyan.dim(`/${total}`)}`;
+        return truncateAnsiLineToWidth(raw, cols);
     }
 
     private renderSlotLines(): string[] {

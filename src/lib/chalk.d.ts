@@ -8,6 +8,7 @@ interface ChalkStyle {
     red: ChalkStyle;
     yellow: ChalkStyle;
     blue: ChalkStyle;
+    cyan: ChalkStyle;
     white: ChalkStyle;
     grey: ChalkStyle;
 }
@@ -17,6 +18,7 @@ interface Chalk extends ChalkStyle {
     red: ChalkStyle;
     yellow: ChalkStyle;
     blue: ChalkStyle;
+    cyan: ChalkStyle;
     white: ChalkStyle;
     grey: ChalkStyle;
     dim: ChalkStyle;

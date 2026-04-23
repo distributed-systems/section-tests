@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createLogUpdate } from 'log-update';
+import sliceAnsi from 'slice-ansi';
+import stringWidth from 'string-width';
+import stripAnsi from 'strip-ansi';
 import chalk from './lib/chalk.js';
 let cachedPackageVersion;
 /**
@@ -52,6 +55,23 @@ function resolveLogUpdateHeight(stream) {
         return fromEnv;
     }
     return 24;
+}
+/**
+ * Keep the live board to one physical line: `slice-ansi` uses visible column indices.
+ */
+function truncateAnsiLineToWidth(line, maxWidth) {
+    if (maxWidth < 1) {
+        return '';
+    }
+    if (stringWidth(stripAnsi(line)) <= maxWidth) {
+        return line;
+    }
+    const ellipsis = chalk.dim('…');
+    const ellipsisWidth = stringWidth(stripAnsi(ellipsis));
+    if (maxWidth <= ellipsisWidth) {
+        return sliceAnsi(line, 0, maxWidth);
+    }
+    return sliceAnsi(line, 0, maxWidth - ellipsisWidth) + ellipsis;
 }
 function readSectionTestsVersion() {
     if (cachedPackageVersion)
@@ -140,6 +160,7 @@ export default class SpecReporter {
                 return;
             }
             case 'test-started':
+                record.runPhaseCompletedOk = false;
                 if (slotState) {
                     slotState.workerId = event.workerId;
                     slotState.state = 'busy';
@@ -154,6 +175,9 @@ export default class SpecReporter {
                 }
                 break;
             case 'phase-finished':
+                if (event.phase === 'run') {
+                    record.runPhaseCompletedOk = true;
+                }
                 if (record.currentPhase === event.phase) {
                     record.currentPhase = undefined;
                 }
@@ -183,6 +207,7 @@ export default class SpecReporter {
                 record.teardownStatus = event.teardownStatus;
                 record.workerTermination = event.workerTermination ?? record.workerTermination;
                 record.currentPhase = undefined;
+                record.runPhaseCompletedOk = undefined;
                 if (slotState) {
                     slotState.workerId = event.workerId;
                     slotState.currentRecord = undefined;
@@ -213,6 +238,7 @@ export default class SpecReporter {
             liveRecord.teardownStatus = finalRecord.teardownStatus;
             liveRecord.workerTermination = finalRecord.workerTermination;
             liveRecord.currentPhase = undefined;
+            liveRecord.runPhaseCompletedOk = undefined;
             const slot = liveRecord.workerSlot;
             if (!slot)
                 return;
@@ -398,20 +424,27 @@ export default class SpecReporter {
     }
     formatSlotLine(slotState) {
         const prefix = chalk.dim(`${slotState.slot.toString().padStart(2, '0')}`);
+        const w = resolveLogUpdateWidth(this.output);
         if (slotState.state === 'busy' && slotState.currentRecord) {
-            return `${prefix} ${chalk.dim('…')} ${chalk.white(this.describeTest(slotState.currentRecord))}${slotState.currentRecord.currentPhase ? chalk.dim(` [${slotState.currentRecord.currentPhase}]`) : ''}`;
+            const r = slotState.currentRecord;
+            const phase = r.currentPhase;
+            const phaseSuffix = phase ? chalk.dim(` [${phase}]`) : '';
+            if (phase === 'teardown' && r.runPhaseCompletedOk) {
+                return truncateAnsiLineToWidth(`${prefix} ${chalk.green('✔')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
+            }
+            return truncateAnsiLineToWidth(`${prefix} ${chalk.dim('…')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
         }
         if (slotState.lastRecord) {
             const lastLine = this.formatRecordLine(slotState.lastRecord);
             if (slotState.state === 'replacing') {
-                return `${prefix} ${lastLine} ${chalk.dim('[replacing worker]')}`;
+                return truncateAnsiLineToWidth(`${prefix} ${lastLine} ${chalk.dim('[replacing worker]')}`, w);
             }
-            return `${prefix} ${lastLine}`;
+            return truncateAnsiLineToWidth(`${prefix} ${lastLine}`, w);
         }
         if (slotState.state === 'replacing') {
-            return `${prefix} ${chalk.dim('↻ replacing worker')}`;
+            return truncateAnsiLineToWidth(`${prefix} ${chalk.dim('↻ replacing worker')}`, w);
         }
-        return `${prefix} ${chalk.dim('· idle')}`;
+        return truncateAnsiLineToWidth(`${prefix} ${chalk.dim('· idle')}`, w);
     }
     formatRecordLine(record) {
         const duration = this.formatDuration(record.durationMs || 0);

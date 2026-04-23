@@ -1,222 +1,175 @@
+import { createLogUpdate } from 'log-update';
 import chalk from './lib/chalk.js';
-const colorMap = new Map();
-colorMap.set('error', 'red');
-colorMap.set('warn', 'yellow');
-colorMap.set('success', 'green');
-colorMap.set('info', 'white');
-colorMap.set('notice', 'dim');
+const levelColorMap = new Map([
+    ['error', 'red'],
+    ['warn', 'yellow'],
+    ['success', 'green'],
+    ['info', 'white'],
+    ['notice', 'dim'],
+]);
 export default class SpecReporter {
     constructor() {
-        this.failedStacks = [];
-        this.currentSectionTree = [];
-        this.cachedMessages = [];
-        this.padAmount = 0;
+        this.records = new Map();
+        this.startedTests = new Set();
+        this.startedOrder = [];
+        this.interactive = Boolean(process.stdout.isTTY);
+        this.logUpdate = this.interactive ? createLogUpdate(process.stdout) : null;
     }
-    send(message) {
-        message.padAmount = 4 * message.depth - 2;
-        this.processMessage(message);
+    onPlan(plan) {
+        this.plan = plan;
+        this.startedTests.clear();
+        this.startedOrder = [];
+        this.records = new Map(plan.tests.map((test) => [
+            test.id,
+            {
+                test,
+                events: [],
+            },
+        ]));
     }
-    getCurrentSectionTree() {
-        let i = this.currentSectionTree.length - 2;
-        const startSection = this.currentSectionTree[this.currentSectionTree.length - 1];
-        let lastDepth = startSection.depth;
-        const sectionTree = [startSection];
-        while (i >= 0) {
-            const currentSection = this.currentSectionTree[i];
-            const currentDepth = currentSection.depth;
-            if (currentDepth < lastDepth) {
-                sectionTree.push(currentSection);
-                lastDepth = currentDepth;
-            }
-            i--;
-            if (currentDepth === 0)
-                break;
-        }
-        return sectionTree.reverse();
-    }
-    processMessage(message) {
-        switch (message.type) {
-            case 'sectionMessage':
-                this.currentSectionTree.push(message);
-                return this.displayMessage(message);
-            case 'testErrorMessage':
-            case 'setupErrorMessage':
-            case 'destroyerErrorMessage':
-                const currentDisplayStack = this.cachedMessages;
-                currentDisplayStack.push(message);
-                this.displayMessages(currentDisplayStack);
-                const messages = [...this.getCurrentSectionTree(), ...currentDisplayStack];
-                this.cachedMessages = [];
-                this.failedStacks.push(messages);
-                break;
-            case 'testSuccessMessage': return this.displayMessage(message);
-            case 'setupSuccessMessage': return this.displayMessage(message);
-            case 'destroyerSuccessMessage': return this.displayMessage(message);
-            case 'testSuiteEndMessage': return this.displayMessage(message);
-            case 'logMessage':
-                if (this.lastStartMessage) {
-                    this.cachedMessages.push(this.lastStartMessage);
-                    this.lastStartMessage = null;
+    onEvent(event) {
+        const record = this.records.get(event.testId);
+        if (!record)
+            return;
+        record.events.push(event);
+        switch (event.type) {
+            case 'test-started':
+                if (!this.startedTests.has(record.test.id)) {
+                    this.startedTests.add(record.test.id);
+                    this.startedOrder.push(record.test.id);
                 }
-                this.cachedMessages.push(message);
-                return;
-            case 'destroyerStartMessage':
-            case 'setupStartMessage':
-            case 'testStartMessage':
-                this.lastStartMessage = message;
-                return;
-        }
-    }
-    displayMessages(messages) {
-        for (const message of messages) {
-            this.displayMessage(message);
-        }
-    }
-    displayCachedMessages() {
-        for (const message of this.cachedMessages) {
-            this.displayMessage(message);
-        }
-        this.cachedMessages = [];
-    }
-    displayMessage(message) {
-        this.padAmount = message.padAmount || 0;
-        switch (message.type) {
-            case 'destroyerErrorMessage':
-                this.displayDestroyerErrorMessage(message);
                 break;
-            case 'destroyerStartMessage':
-                this.displayDestroyerStartMessage(message);
+            case 'test-timeout':
+                record.timeout = event.timeout;
                 break;
-            case 'destroyerSuccessMessage':
-                this.displayDestroyerSuccessMessage(message);
+            case 'worker-terminated':
+                record.workerTermination = event.workerTermination;
+                if (!this.interactive) {
+                    this.displayWorkerTerminationEvent(record);
+                }
                 break;
-            case 'logMessage':
-                this.displayLogMessage(message);
-                break;
-            case 'sectionMessage':
-                this.displaySectionMessage(message);
-                break;
-            case 'setupErrorMessage':
-                this.displaySetupErrorMessage(message);
-                break;
-            case 'setupStartMessage':
-                this.displaySetupStartMessage(message);
-                break;
-            case 'setupSuccessMessage':
-                this.displaySetupSuccessMessage(message);
-                break;
-            case 'testErrorMessage':
-                this.displayTestErrorMessage(message);
-                break;
-            case 'testStartMessage':
-                this.displayTestStartMessage(message);
-                break;
-            case 'testSuccessMessage':
-                this.displayTestSuccessMessage(message);
-                break;
-            case 'testSuiteEndMessage':
-                this.displayTestSuiteEndMessage(message);
+            case 'test-finished':
+                record.status = event.status;
+                record.durationMs = event.durationMs;
+                record.failure = event.failure;
+                record.failurePhase = event.failurePhase;
+                record.timeout = event.timeout;
+                record.teardownStatus = event.teardownStatus;
+                record.workerTermination = event.workerTermination ?? record.workerTermination;
                 break;
         }
-        this.lastType = message.type;
+        if (this.interactive) {
+            this.renderInteractiveBoard();
+        }
+        else if (event.type === 'test-finished') {
+            this.displayFinishedRecord(record);
+        }
     }
-    displayTestSuiteEndMessage(message) {
-        this.padAmount = 0;
-        // display all fails
-        if (this.failedStacks.length) {
-            console.log(`\n\n${this.pad(2)}${chalk.yellow('======================== Failed Tests ======================')}`);
-            for (const stack of this.failedStacks) {
-                this.displayMessages(stack);
-            }
-            this.padAmount = 0;
-            console.log(`\n\n${this.pad(2)}${chalk.yellow(`${message.failed} / ${message.ok + message.failed} tests failed!`)}\n\n`);
+    onSummary(summary) {
+        this.summary = summary;
+        this.records = new Map(summary.records.map((record) => [record.test.id, record]));
+    }
+    flush() {
+        if (this.interactive) {
+            this.renderInteractiveBoard();
+            this.logUpdate?.done();
+        }
+        if (!this.summary)
+            return;
+        if (this.summary.failed > 0) {
+            console.log(`\n${chalk.yellow(`${this.summary.failed} / ${this.summary.total} tests failed!`)}\n`);
+            this.displayFailureDetails();
         }
         else {
-            console.log(`\n\n${this.pad(2)}${chalk.green.bold(`${message.ok + message.failed} tests executed successfully 😊`)}\n\n`);
+            console.log(`\n${chalk.green.bold(`${this.summary.total} tests executed successfully`)}\n`);
         }
     }
-    displayLogMessage(message) {
-        const color = colorMap.get(message.level) || 'white';
-        const prefix = chalk[color](`➟  ${message.level}:`);
-        console.log(`${this.pad(8)}${prefix} ${chalk.white(message.message)}`);
+    renderInteractiveBoard() {
+        if (!this.plan)
+            return;
+        if (!this.logUpdate)
+            return;
+        const lines = this.startedOrder
+            .map((testId) => this.records.get(testId))
+            .filter((record) => Boolean(record))
+            .map((record) => this.formatRecordLine(record));
+        if (!lines.length)
+            return;
+        this.logUpdate(lines.join('\n'));
     }
-    displaySetupStartMessage(message) {
-        console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.grey(message.name)}`);
+    displayFinishedRecord(record) {
+        console.log(this.formatRecordLine(record));
     }
-    displaySetupErrorMessage(message) {
-        console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
-        message.err.stack.forEach((frame) => {
-            console.log(`${this.pad(8)}${chalk.dim(`at ${frame.name} (${frame.source}:${frame.line})`)}`);
-        });
-    }
-    displaySetupSuccessMessage(message) {
-        this.displayCachedMessages();
-        console.log(`${this.pad(4)}${chalk.dim.green('✔ ')}${chalk.grey(message.name)}${this.getDurationMark(message)}`);
-    }
-    displayTestStartMessage(message) {
-        console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.white(message.test.name)}`);
-    }
-    displayTestSuccessMessage(message) {
-        this.displayCachedMessages();
-        console.log(`${this.pad(4)}${chalk.green('✔ ')}${chalk.white(message.test.name)}${this.getDurationMark(message)}`);
-    }
-    displayTestErrorMessage(message) {
-        console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(message.test.name + ':')} ${chalk.white(message.err.message)}\n`);
-        if (typeof message.err.stack === 'string') {
-            const data = /at (?<functionName>.*) \(file:\/\/(?<fileName>.*.js):(?<lineNumber>\d+)/i.exec(message.err.stack);
-            if (data?.groups) {
-                console.log(`${this.pad(8)}${chalk.dim(`at ${data.groups.functionName} (${data.groups.fileName}:${data.groups.lineNumber})`)}`);
-            }
-        }
-        else {
-            console.log(`${this.pad(8)}${chalk.dim(`at ${message.err.stack[0].name || '<unknown>'} (${message.err.stack[0].source}:${message.err.stack[0].line})`)}`);
-        }
-        if (message.err.type === 'AssertionError' && message.err.actual !== undefined && message.err.expected !== undefined) {
-            console.log(`\n${this.pad(8)}${chalk.red('actual: ')}    ${chalk.white(message.err.actual)}`);
-            console.log(`${this.pad(8)}${chalk.dim('operator: ')}  ${chalk.dim(message.err.operator || '')}`);
-            console.log(`${this.pad(8)}${chalk.green('expected: ')}  ${chalk.white(message.err.expected)}\n`);
-        }
-        else {
-            // display the friggin stack
-            if (typeof message.err.stack === 'string')
-                console.log(message.err.stack);
-            else {
-                message.err.stack.slice(1).forEach((frame) => {
-                    console.log(`${this.pad(8)}${chalk.dim(`at ${frame.name} (${frame.source}:${frame.line})`)}`);
+    displayFailureDetails() {
+        if (!this.summary)
+            return;
+        const failedRecords = this.summary.records.filter((record) => record.status === 'failed' && record.failure);
+        if (!failedRecords.length)
+            return;
+        for (const record of failedRecords) {
+            console.log(`${chalk.red(record.failurePhase || 'run')}: ${chalk.white(record.test.name)} - ${chalk.white(record.failure.message)}`);
+            if (record.failure?.stack) {
+                record.failure.stack
+                    .split('\n')
+                    .filter((line) => line.trim().length > 0)
+                    .slice(0, 8)
+                    .forEach((line) => {
+                    console.log(`${this.pad(4)}${chalk.dim(line.trim())}`);
                 });
             }
+            console.log('');
         }
     }
-    getDurationMark(message) {
-        if (message.duration && Number.isInteger(message.duration)) {
-            if (message.duration > 500)
-                return chalk.dim(` (${chalk.yellow.bold(message.duration.toString())} msec)`);
+    displayWorkerTerminationEvent(record) {
+        if (!record.workerTermination?.forced)
+            return;
+        console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
+    }
+    formatRecordLine(record) {
+        const suiteLabel = record.test.suitePath.length ? `${record.test.suitePath.join(' > ')} > ` : '';
+        const duration = this.formatDuration(record.durationMs || 0);
+        if (!record.status) {
+            const phase = this.getCurrentPhase(record);
+            const status = chalk.dim('…');
+            const suffix = phase ? chalk.dim(` [${phase}]`) : '';
+            return `${status} ${chalk.white(`${suiteLabel}${record.test.name}`)}${suffix}`;
         }
-        return '';
-    }
-    displayDestroyerStartMessage(message) {
-        console.log(`${this.pad(4)}${chalk.dim('⬇ ')}${chalk.grey(message.name)}`);
-    }
-    displayDestroyerErrorMessage(message) {
-        console.log(`${this.pad(4)}${chalk.red('✖ ')}${chalk.yellow(`${message.name}:`)} ${chalk.white(message.err.message)}\n`);
-        message.err.stack.forEach((frame) => {
-            console.log(`${this.pad(8)}${chalk.dim(`at ${frame.name} (${frame.source}:${frame.line})`)}`);
-        });
-    }
-    displayDestroyerSuccessMessage(message) {
-        this.displayCachedMessages();
-        console.log(`${this.pad(4)}${chalk.dim.green('✔ ')}${chalk.grey(message.name)}${this.getDurationMark(message)}`);
-    }
-    displaySectionMessage(message) {
-        if (message.sectionName !== 'root' || message.depth !== 0) {
-            console.log(`${this.lastType === 'sectionMessage' ? '' : '\n'}${this.pad()}${chalk.blue.bold(message.sectionName)}`);
+        if (record.status === 'passed') {
+            return `${chalk.green('✔')} ${chalk.white(`${suiteLabel}${record.test.name}`)}${duration}`;
         }
-        else {
-            //console.log(`  ${chalk.blue.bold('Executing Tests')}`);
+        const parts = [];
+        if (record.timeout) {
+            parts.push(`timeout ${record.timeout.phase} ${record.timeout.timeoutMs} ms`);
         }
+        else if (record.failurePhase) {
+            parts.push(record.failurePhase);
+        }
+        if (record.teardownStatus && record.teardownStatus !== 'not-needed') {
+            parts.push(`teardown ${record.teardownStatus}`);
+        }
+        if (record.workerTermination?.forced) {
+            parts.push(`killed after ${record.workerTermination.graceMs} ms grace`);
+        }
+        if (!parts.length && record.failure?.message) {
+            parts.push(record.failure.message);
+        }
+        return `${chalk.red('✖')} ${chalk.yellow(`${suiteLabel}${record.test.name}`)}${duration}${parts.length ? chalk.dim(` [${parts.join(', ')}]`) : ''}`;
     }
-    pad(add = 0) {
-        return ' '.repeat(this.padAmount + add);
+    getCurrentPhase(record) {
+        for (let index = record.events.length - 1; index >= 0; index--) {
+            const event = record.events[index];
+            if (event.type === 'phase-started')
+                return event.phase;
+        }
+        return undefined;
+    }
+    formatDuration(durationMs) {
+        if (!durationMs || durationMs < 200)
+            return '';
+        return chalk.dim(` (${durationMs} ms)`);
+    }
+    pad(amount) {
+        return ' '.repeat(amount);
     }
 }
 //# sourceMappingURL=SpecReporter.js.map

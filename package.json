@@ -30,7 +30,8 @@
   "dependencies": {
     "@distributed-systems/callsite": "^4.0.0",
     "@distributed-systems/glob": "^3.0.0",
-    "@distributed-systems/types": "^3.0.0"
+    "@distributed-systems/types": "^3.0.0",
+    "log-update": "8.0.0"
   },
   "bin": {
     "section": "./dist/bin/run-npm.js"
@@ -45,6 +46,7 @@
   "files": [
     "dist",
     "README.md",
+    "MIGRATION_FOR_AGENTS.md",
     "LICENSE"
   ]
 }

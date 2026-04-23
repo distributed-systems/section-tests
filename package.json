@@ -1,6 +1,6 @@
 {
   "name": "section-tests",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "TDD for node.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

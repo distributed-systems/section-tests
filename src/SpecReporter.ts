@@ -12,7 +12,7 @@ import {
 } from './runtime-types.js';
 
 type ReporterMode = 'detailed' | 'compact';
-type Renderer = ((message: string) => void) & { done: () => void };
+type Renderer = ((message: string) => void) & { done: () => void; clear: () => void };
 
 interface SpecReporterOptions {
     interactive?: boolean;
@@ -92,9 +92,10 @@ export default class SpecReporter implements Reporter {
         this.suiteOrder = [];
         this.records.clear();
         this.suiteProgress.clear();
+        const duplicateSuiteLabels = this.getDuplicateSuiteLabels(plan.tests);
 
         plan.tests.forEach((test: CollectedTest) => {
-            const suiteInfo = this.getSuiteInfo(test);
+            const suiteInfo = this.getSuiteInfo(test, duplicateSuiteLabels);
             const suite = this.getOrCreateSuiteProgress(suiteInfo.key, suiteInfo.label);
             suite.total += 1;
 
@@ -190,8 +191,13 @@ export default class SpecReporter implements Reporter {
 
     flush(): void {
         if (this.interactive) {
-            this.renderNow();
-            this.renderer?.done();
+            this.clearPendingRender();
+            if (this.mode === 'compact') {
+                this.renderer?.clear();
+            } else {
+                this.renderInteractiveBoard();
+                this.renderer?.done();
+            }
         }
 
         if (!this.summary) return;
@@ -226,11 +232,14 @@ export default class SpecReporter implements Reporter {
     }
 
     private renderNow(): void {
-        if (this.renderTimer) {
-            clearTimeout(this.renderTimer);
-            this.renderTimer = null;
-        }
+        this.clearPendingRender();
         this.renderInteractiveBoard();
+    }
+
+    private clearPendingRender(): void {
+        if (!this.renderTimer) return;
+        clearTimeout(this.renderTimer);
+        this.renderTimer = null;
     }
 
     private renderInteractiveBoard(): void {
@@ -395,11 +404,16 @@ export default class SpecReporter implements Reporter {
         return `${icon} ${chalk.white(suite.label)} ${chalk.dim(parts.join(' | '))}`;
     }
 
-    private getSuiteInfo(test: CollectedTest): { key: string; label: string } {
+    private getSuiteInfo(test: CollectedTest, duplicateSuiteLabels: Set<string>): { key: string; label: string } {
         if (test.suitePath.length) {
+            const topLevelSuite = test.suitePath[0];
+            const label = duplicateSuiteLabels.has(topLevelSuite)
+                ? `${topLevelSuite} (${basename(test.file)})`
+                : topLevelSuite;
+
             return {
-                key: `suite:${test.file}:${test.suitePath[0]}`,
-                label: test.suitePath[0],
+                key: `suite:${test.file}:${topLevelSuite}`,
+                label,
             };
         }
 
@@ -426,6 +440,24 @@ export default class SpecReporter implements Reporter {
         this.suiteProgress.set(key, suite);
         this.suiteOrder.push(key);
         return suite;
+    }
+
+    private getDuplicateSuiteLabels(tests: CollectedTest[]): Set<string> {
+        const filesByLabel = new Map<string, Set<string>>();
+
+        tests.forEach((test) => {
+            if (!test.suitePath.length) return;
+            const label = test.suitePath[0];
+            const files = filesByLabel.get(label) || new Set<string>();
+            files.add(test.file);
+            filesByLabel.set(label, files);
+        });
+
+        return new Set(
+            Array.from(filesByLabel.entries())
+                .filter(([, files]) => files.size > 1)
+                .map(([label]) => label),
+        );
     }
 
     private formatDuration(durationMs: number): string {

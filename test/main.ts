@@ -88,11 +88,15 @@ function createReporterHarness({
 } = {}) {
     const frames: string[] = [];
     let doneCalls = 0;
+    let clearCalls = 0;
     const renderer = ((message: string) => {
         frames.push(stripAnsi(message));
-    }) as ((message: string) => void) & { done: () => void };
+    }) as ((message: string) => void) & { done: () => void; clear: () => void };
     renderer.done = () => {
         doneCalls += 1;
+    };
+    renderer.clear = () => {
+        clearCalls += 1;
     };
 
     const reporter = new SpecReporter({
@@ -109,6 +113,7 @@ function createReporterHarness({
         frames,
         getLastFrame: () => frames[frames.length - 1] || '',
         getDoneCalls: () => doneCalls,
+        getClearCalls: () => clearCalls,
     };
 }
 
@@ -763,6 +768,74 @@ export default [
                 });
                 assert.match(compactLogs.join('\n'), /1 \/ 2 tests failed!/i);
                 assert.match(compactLogs.join('\n'), /run: broken compact - compact boom/i);
+            },
+        }),
+
+        test('disambiguates duplicate compact suite labels and clears live board on flush', {
+            async run() {
+                const tests = [
+                    createCollectedTest('dupe-1', 'first request context test', ['RequestContext'], '/tmp/request-context-one.test.mjs', 0),
+                    createCollectedTest('dupe-2', 'second request context test', ['RequestContext'], '/tmp/request-context-two.test.mjs', 0),
+                ];
+                const harness = createReporterHarness({
+                    compactThreshold: 1,
+                    renderIntervalMs: 1,
+                });
+
+                harness.reporter.onPlan(createPlan(tests));
+                harness.reporter.onEvent({
+                    type: 'test-started',
+                    ...eventBase(tests[0]),
+                    mode: 'parallel',
+                });
+                harness.reporter.onEvent({
+                    type: 'test-finished',
+                    ...eventBase(tests[0]),
+                    status: 'passed',
+                    durationMs: 10,
+                    prepareDurationMs: 2,
+                    teardownStatus: 'not-needed',
+                });
+
+                await sleep(10);
+
+                const frame = harness.getLastFrame();
+                assert.match(frame, /RequestContext \(request-context-one\.test\.mjs\)/i);
+                assert.match(frame, /RequestContext \(request-context-two\.test\.mjs\)/i);
+
+                harness.reporter.onSummary({
+                    ok: 2,
+                    failed: 0,
+                    total: 2,
+                    durationMs: 25,
+                    pass: true,
+                    records: [
+                        {
+                            test: tests[0],
+                            events: [],
+                            status: 'passed',
+                            durationMs: 10,
+                            prepareDurationMs: 2,
+                            teardownStatus: 'not-needed',
+                        },
+                        {
+                            test: tests[1],
+                            events: [],
+                            status: 'passed',
+                            durationMs: 8,
+                            prepareDurationMs: 1,
+                            teardownStatus: 'not-needed',
+                        },
+                    ] satisfies TestExecutionRecord[],
+                });
+
+                const logs = await captureConsoleLogs(() => {
+                    harness.reporter.flush();
+                });
+
+                assert.equal(harness.getClearCalls(), 1);
+                assert.equal(harness.getDoneCalls(), 0);
+                assert.match(logs.join('\n'), /2 tests executed successfully/i);
             },
         }),
     ),

@@ -26,8 +26,9 @@ export default class SpecReporter {
         this.suiteOrder = [];
         this.records.clear();
         this.suiteProgress.clear();
+        const duplicateSuiteLabels = this.getDuplicateSuiteLabels(plan.tests);
         plan.tests.forEach((test) => {
-            const suiteInfo = this.getSuiteInfo(test);
+            const suiteInfo = this.getSuiteInfo(test, duplicateSuiteLabels);
             const suite = this.getOrCreateSuiteProgress(suiteInfo.key, suiteInfo.label);
             suite.total += 1;
             this.records.set(test.id, {
@@ -119,8 +120,14 @@ export default class SpecReporter {
     }
     flush() {
         if (this.interactive) {
-            this.renderNow();
-            this.renderer?.done();
+            this.clearPendingRender();
+            if (this.mode === 'compact') {
+                this.renderer?.clear();
+            }
+            else {
+                this.renderInteractiveBoard();
+                this.renderer?.done();
+            }
         }
         if (!this.summary)
             return;
@@ -152,11 +159,14 @@ export default class SpecReporter {
         this.renderTimer = setTimeout(runRender, this.renderIntervalMs);
     }
     renderNow() {
-        if (this.renderTimer) {
-            clearTimeout(this.renderTimer);
-            this.renderTimer = null;
-        }
+        this.clearPendingRender();
         this.renderInteractiveBoard();
+    }
+    clearPendingRender() {
+        if (!this.renderTimer)
+            return;
+        clearTimeout(this.renderTimer);
+        this.renderTimer = null;
     }
     renderInteractiveBoard() {
         if (!this.plan)
@@ -295,11 +305,15 @@ export default class SpecReporter {
             parts.push(`${suite.timedOut} timed out`);
         return `${icon} ${chalk.white(suite.label)} ${chalk.dim(parts.join(' | '))}`;
     }
-    getSuiteInfo(test) {
+    getSuiteInfo(test, duplicateSuiteLabels) {
         if (test.suitePath.length) {
+            const topLevelSuite = test.suitePath[0];
+            const label = duplicateSuiteLabels.has(topLevelSuite)
+                ? `${topLevelSuite} (${basename(test.file)})`
+                : topLevelSuite;
             return {
-                key: `suite:${test.file}:${test.suitePath[0]}`,
-                label: test.suitePath[0],
+                key: `suite:${test.file}:${topLevelSuite}`,
+                label,
             };
         }
         return {
@@ -324,6 +338,20 @@ export default class SpecReporter {
         this.suiteProgress.set(key, suite);
         this.suiteOrder.push(key);
         return suite;
+    }
+    getDuplicateSuiteLabels(tests) {
+        const filesByLabel = new Map();
+        tests.forEach((test) => {
+            if (!test.suitePath.length)
+                return;
+            const label = test.suitePath[0];
+            const files = filesByLabel.get(label) || new Set();
+            files.add(test.file);
+            filesByLabel.set(label, files);
+        });
+        return new Set(Array.from(filesByLabel.entries())
+            .filter(([, files]) => files.size > 1)
+            .map(([label]) => label));
     }
     formatDuration(durationMs) {
         if (!durationMs || durationMs < 200)

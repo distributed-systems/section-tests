@@ -1,6 +1,7 @@
 import { Reporter, TestEvent, TestPlan, TestRunSummary } from './runtime-types.js';
 type Renderer = ((message: string) => void) & {
     done: () => void;
+    clear: () => void;
 };
 interface SpecReporterOptions {
     interactive?: boolean;
@@ -33,6 +34,7 @@ export default class SpecReporter implements Reporter {
     flush(): void;
     private scheduleRender;
     private renderNow;
+    private clearPendingRender;
     private renderInteractiveBoard;
     private renderDetailedLines;
     private renderCompactLines;
@@ -44,6 +46,7 @@ export default class SpecReporter implements Reporter {
     private formatSuiteLine;
     private getSuiteInfo;
     private getOrCreateSuiteProgress;
+    private getDuplicateSuiteLabels;
     private formatDuration;
     private formatStatDuration;
     private pad;

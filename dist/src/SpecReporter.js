@@ -1,42 +1,64 @@
+import { basename } from 'node:path';
 import { createLogUpdate } from 'log-update';
 import chalk from './lib/chalk.js';
-const levelColorMap = new Map([
-    ['error', 'red'],
-    ['warn', 'yellow'],
-    ['success', 'green'],
-    ['info', 'white'],
-    ['notice', 'dim'],
-]);
 export default class SpecReporter {
-    constructor() {
+    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, compactThreshold = 80, maxRunningTests = 6, createRenderer = (stream) => createLogUpdate(stream), } = {}) {
         this.records = new Map();
-        this.startedTests = new Set();
+        this.suiteProgress = new Map();
+        this.suiteOrder = [];
         this.startedOrder = [];
-        this.interactive = Boolean(process.stdout.isTTY);
-        this.logUpdate = this.interactive ? createLogUpdate(process.stdout) : null;
+        this.runningOrder = [];
+        this.mode = 'detailed';
+        this.renderTimer = null;
+        this.output = output;
+        this.interactive = interactive ?? Boolean(output.isTTY);
+        this.renderer = this.interactive ? createRenderer(this.output) : null;
+        this.renderIntervalMs = renderIntervalMs;
+        this.compactThreshold = compactThreshold;
+        this.maxRunningTests = maxRunningTests;
     }
     onPlan(plan) {
         this.plan = plan;
-        this.startedTests.clear();
+        this.summary = undefined;
+        this.mode = plan.tests.length > this.compactThreshold ? 'compact' : 'detailed';
         this.startedOrder = [];
-        this.records = new Map(plan.tests.map((test) => [
-            test.id,
-            {
+        this.runningOrder = [];
+        this.suiteOrder = [];
+        this.records.clear();
+        this.suiteProgress.clear();
+        plan.tests.forEach((test) => {
+            const suiteInfo = this.getSuiteInfo(test);
+            const suite = this.getOrCreateSuiteProgress(suiteInfo.key, suiteInfo.label);
+            suite.total += 1;
+            this.records.set(test.id, {
                 test,
-                events: [],
-            },
-        ]));
+                suiteKey: suiteInfo.key,
+                suiteLabel: suiteInfo.label,
+                started: false,
+                teardownStatus: test.source.hasTeardown ? 'not-run' : 'not-needed',
+            });
+        });
     }
     onEvent(event) {
         const record = this.records.get(event.testId);
         if (!record)
             return;
-        record.events.push(event);
+        const suite = this.suiteProgress.get(record.suiteKey);
         switch (event.type) {
             case 'test-started':
-                if (!this.startedTests.has(record.test.id)) {
-                    this.startedTests.add(record.test.id);
+                if (!record.started) {
+                    record.started = true;
                     this.startedOrder.push(record.test.id);
+                    this.runningOrder.push(record.test.id);
+                    suite.running += 1;
+                }
+                break;
+            case 'phase-started':
+                record.currentPhase = event.phase;
+                break;
+            case 'phase-finished':
+                if (record.currentPhase === event.phase) {
+                    record.currentPhase = undefined;
                 }
                 break;
             case 'test-timeout':
@@ -57,10 +79,22 @@ export default class SpecReporter {
                 record.timeout = event.timeout;
                 record.teardownStatus = event.teardownStatus;
                 record.workerTermination = event.workerTermination ?? record.workerTermination;
+                record.currentPhase = undefined;
+                if (suite && record.started) {
+                    suite.running = Math.max(0, suite.running - 1);
+                    suite.completed += 1;
+                    if (event.status === 'passed')
+                        suite.passed += 1;
+                    else
+                        suite.failed += 1;
+                    if (event.timeout)
+                        suite.timedOut += 1;
+                }
+                this.runningOrder = this.runningOrder.filter((testId) => testId !== record.test.id);
                 break;
         }
         if (this.interactive) {
-            this.renderInteractiveBoard();
+            this.scheduleRender();
         }
         else if (event.type === 'test-finished') {
             this.displayFinishedRecord(record);
@@ -68,12 +102,25 @@ export default class SpecReporter {
     }
     onSummary(summary) {
         this.summary = summary;
-        this.records = new Map(summary.records.map((record) => [record.test.id, record]));
+        summary.records.forEach((finalRecord) => {
+            const liveRecord = this.records.get(finalRecord.test.id);
+            if (!liveRecord)
+                return;
+            liveRecord.status = finalRecord.status;
+            liveRecord.durationMs = finalRecord.durationMs;
+            liveRecord.prepareDurationMs = finalRecord.prepareDurationMs;
+            liveRecord.failure = finalRecord.failure;
+            liveRecord.failurePhase = finalRecord.failurePhase;
+            liveRecord.timeout = finalRecord.timeout;
+            liveRecord.teardownStatus = finalRecord.teardownStatus;
+            liveRecord.workerTermination = finalRecord.workerTermination;
+            liveRecord.currentPhase = undefined;
+        });
     }
     flush() {
         if (this.interactive) {
-            this.renderInteractiveBoard();
-            this.logUpdate?.done();
+            this.renderNow();
+            this.renderer?.done();
         }
         if (!this.summary)
             return;
@@ -89,18 +136,79 @@ export default class SpecReporter {
             console.log('');
         }
     }
+    scheduleRender() {
+        if (!this.interactive)
+            return;
+        if (this.renderTimer)
+            return;
+        const runRender = () => {
+            this.renderTimer = null;
+            this.renderInteractiveBoard();
+        };
+        if (this.renderIntervalMs <= 0) {
+            queueMicrotask(runRender);
+            return;
+        }
+        this.renderTimer = setTimeout(runRender, this.renderIntervalMs);
+    }
+    renderNow() {
+        if (this.renderTimer) {
+            clearTimeout(this.renderTimer);
+            this.renderTimer = null;
+        }
+        this.renderInteractiveBoard();
+    }
     renderInteractiveBoard() {
         if (!this.plan)
             return;
-        if (!this.logUpdate)
+        if (!this.renderer)
             return;
-        const lines = this.startedOrder
+        const lines = this.mode === 'compact'
+            ? this.renderCompactLines()
+            : this.renderDetailedLines();
+        if (!lines.length)
+            return;
+        this.renderer(lines.join('\n'));
+    }
+    renderDetailedLines() {
+        return this.startedOrder
             .map((testId) => this.records.get(testId))
             .filter((record) => Boolean(record))
             .map((record) => this.formatRecordLine(record));
-        if (!lines.length)
-            return;
-        this.logUpdate(lines.join('\n'));
+    }
+    renderCompactLines() {
+        const total = this.plan?.tests.length || 0;
+        const suiteValues = this.suiteOrder
+            .map((key) => this.suiteProgress.get(key))
+            .filter((suite) => Boolean(suite));
+        const completed = suiteValues.reduce((sum, suite) => sum + suite.completed, 0);
+        const running = suiteValues.reduce((sum, suite) => sum + suite.running, 0);
+        const failed = suiteValues.reduce((sum, suite) => sum + suite.failed, 0);
+        const timedOut = suiteValues.reduce((sum, suite) => sum + suite.timedOut, 0);
+        const lines = [
+            chalk.dim(`progress ${completed}/${total} finished`
+                + ` | running ${running}`
+                + ` | failed ${failed}`
+                + (timedOut ? ` | timed out ${timedOut}` : '')),
+            ...suiteValues.map((suite) => this.formatSuiteLine(suite)),
+        ];
+        const runningRecords = this.runningOrder
+            .map((testId) => this.records.get(testId))
+            .filter((record) => Boolean(record))
+            .slice(0, this.maxRunningTests);
+        if (runningRecords.length) {
+            lines.push('');
+            lines.push(chalk.dim('running now'));
+            runningRecords.forEach((record) => {
+                const suffix = record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : '';
+                lines.push(`… ${chalk.white(`${record.suiteLabel} > ${record.test.name}`)}${suffix}`);
+            });
+            const remaining = this.runningOrder.length - runningRecords.length;
+            if (remaining > 0) {
+                lines.push(chalk.dim(`… and ${remaining} more running`));
+            }
+        }
+        return lines;
     }
     displayFinishedRecord(record) {
         console.log(this.formatRecordLine(record));
@@ -149,9 +257,8 @@ export default class SpecReporter {
         const suiteLabel = record.test.suitePath.length ? `${record.test.suitePath.join(' > ')} > ` : '';
         const duration = this.formatDuration(record.durationMs || 0);
         if (!record.status) {
-            const phase = this.getCurrentPhase(record);
             const status = chalk.dim('…');
-            const suffix = phase ? chalk.dim(` [${phase}]`) : '';
+            const suffix = record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : '';
             return `${status} ${chalk.white(`${suiteLabel}${record.test.name}`)}${suffix}`;
         }
         if (record.status === 'passed') {
@@ -175,13 +282,48 @@ export default class SpecReporter {
         }
         return `${chalk.red('✖')} ${chalk.yellow(`${suiteLabel}${record.test.name}`)}${duration}${parts.length ? chalk.dim(` [${parts.join(', ')}]`) : ''}`;
     }
-    getCurrentPhase(record) {
-        for (let index = record.events.length - 1; index >= 0; index--) {
-            const event = record.events[index];
-            if (event.type === 'phase-started')
-                return event.phase;
+    formatSuiteLine(suite) {
+        const icon = suite.failed > 0 ? chalk.red('✖') : suite.running > 0 ? chalk.dim('…') : chalk.green('✔');
+        const parts = [
+            `${suite.completed}/${suite.total}`,
+            `${suite.running} running`,
+            `${suite.passed} passed`,
+        ];
+        if (suite.failed)
+            parts.push(`${suite.failed} failed`);
+        if (suite.timedOut)
+            parts.push(`${suite.timedOut} timed out`);
+        return `${icon} ${chalk.white(suite.label)} ${chalk.dim(parts.join(' | '))}`;
+    }
+    getSuiteInfo(test) {
+        if (test.suitePath.length) {
+            return {
+                key: `suite:${test.file}:${test.suitePath[0]}`,
+                label: test.suitePath[0],
+            };
         }
-        return undefined;
+        return {
+            key: `file:${test.file}`,
+            label: basename(test.file),
+        };
+    }
+    getOrCreateSuiteProgress(key, label) {
+        const existing = this.suiteProgress.get(key);
+        if (existing)
+            return existing;
+        const suite = {
+            key,
+            label,
+            total: 0,
+            running: 0,
+            completed: 0,
+            passed: 0,
+            failed: 0,
+            timedOut: 0,
+        };
+        this.suiteProgress.set(key, suite);
+        this.suiteOrder.push(key);
+        return suite;
     }
     formatDuration(durationMs) {
         if (!durationMs || durationMs < 200)

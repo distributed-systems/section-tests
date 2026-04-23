@@ -60,6 +60,8 @@ export default class SpecReporter implements Reporter {
     /** Wall-clock duration in short form, e.g. 12.17s or 125 ms. */
     private formatDurationClock;
     private displayWorkerTerminationEvent;
+    /** Leading glyph for an in-flight test: setup ↑, teardown ↓, run / not yet phased …. */
+    private inProgressGlyph;
     private formatSlotLine;
     private formatRecordLine;
     private describeTest;

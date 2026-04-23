@@ -77,6 +77,15 @@ function resolveLogUpdateHeight(stream: NodeJS.WriteStream): number {
 }
 
 /**
+ * Separator row above/below the progress line. Must not be a truly empty string: `log-update`'s
+ * incremental diff can drop or reorder consecutive `''` lines; a dim space is visually blank and
+ * diffs reliably (avoids flicker from full-frame erase/redraw).
+ */
+function progressBoardSeparatorLine(): string {
+    return chalk.dim(' ');
+}
+
+/**
  * Keep the live board to one physical line: `slice-ansi` uses visible column indices.
  */
 function truncateAnsiLineToWidth(line: string, maxWidth: number): string {
@@ -412,8 +421,9 @@ export default class SpecReporter implements Reporter {
 
         const lines: string[] = [];
         if (this.interactive && this.totalTestsPlanned > 0) {
+            lines.push(progressBoardSeparatorLine());
             lines.push(this.formatProgressLine());
-            lines.push('');
+            lines.push(progressBoardSeparatorLine());
         }
         lines.push(...this.renderSlotLines());
         if (!lines.length) return;
@@ -568,6 +578,13 @@ export default class SpecReporter implements Reporter {
         console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
     }
 
+    /** Leading glyph for an in-flight test: setup ↑, teardown ↓, run / not yet phased …. */
+    private inProgressGlyph(phase?: TestPhase): string {
+        if (phase === 'setup') return '↑';
+        if (phase === 'teardown') return '↓';
+        return '…';
+    }
+
     private formatSlotLine(slotState: SlotState): string {
         const prefix = chalk.dim(`${slotState.slot.toString().padStart(2, '0')}`);
         const w = resolveLogUpdateWidth(this.output);
@@ -583,7 +600,7 @@ export default class SpecReporter implements Reporter {
                 );
             }
             return truncateAnsiLineToWidth(
-                `${prefix} ${chalk.dim('…')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`,
+                `${prefix} ${chalk.dim(this.inProgressGlyph(phase))} ${chalk.white(this.describeTest(r))}${phaseSuffix}`,
                 w,
             );
         }
@@ -608,7 +625,8 @@ export default class SpecReporter implements Reporter {
         const duration = this.formatDuration(record.durationMs || 0);
 
         if (!record.status) {
-            return `${chalk.dim('…')} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
+            const g = this.inProgressGlyph(record.currentPhase);
+            return `${chalk.dim(g)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
         }
 
         if (record.status === 'passed') {

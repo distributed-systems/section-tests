@@ -57,6 +57,14 @@ function resolveLogUpdateHeight(stream) {
     return 24;
 }
 /**
+ * Separator row above/below the progress line. Must not be a truly empty string: `log-update`'s
+ * incremental diff can drop or reorder consecutive `''` lines; a dim space is visually blank and
+ * diffs reliably (avoids flicker from full-frame erase/redraw).
+ */
+function progressBoardSeparatorLine() {
+    return chalk.dim(' ');
+}
+/**
  * Keep the live board to one physical line: `slice-ansi` uses visible column indices.
  */
 function truncateAnsiLineToWidth(line, maxWidth) {
@@ -320,8 +328,9 @@ class SpecReporter {
             return;
         const lines = [];
         if (this.interactive && this.totalTestsPlanned > 0) {
+            lines.push(progressBoardSeparatorLine());
             lines.push(this.formatProgressLine());
-            lines.push('');
+            lines.push(progressBoardSeparatorLine());
         }
         lines.push(...this.renderSlotLines());
         if (!lines.length)
@@ -455,6 +464,14 @@ class SpecReporter {
             return;
         console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
     }
+    /** Leading glyph for an in-flight test: setup ↑, teardown ↓, run / not yet phased …. */
+    inProgressGlyph(phase) {
+        if (phase === 'setup')
+            return '↑';
+        if (phase === 'teardown')
+            return '↓';
+        return '…';
+    }
     formatSlotLine(slotState) {
         const prefix = chalk.dim(`${slotState.slot.toString().padStart(2, '0')}`);
         const w = resolveLogUpdateWidth(this.output);
@@ -465,7 +482,7 @@ class SpecReporter {
             if (phase === 'teardown' && r.runPhaseCompletedOk) {
                 return truncateAnsiLineToWidth(`${prefix} ${chalk.green('✔')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
             }
-            return truncateAnsiLineToWidth(`${prefix} ${chalk.dim('…')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
+            return truncateAnsiLineToWidth(`${prefix} ${chalk.dim(this.inProgressGlyph(phase))} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
         }
         if (slotState.lastRecord) {
             const lastLine = this.formatRecordLine(slotState.lastRecord);
@@ -482,7 +499,8 @@ class SpecReporter {
     formatRecordLine(record) {
         const duration = this.formatDuration(record.durationMs || 0);
         if (!record.status) {
-            return `${chalk.dim('…')} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
+            const g = this.inProgressGlyph(record.currentPhase);
+            return `${chalk.dim(g)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
         }
         if (record.status === 'passed') {
             return `${chalk.green('✔')} ${chalk.white(this.describeTest(record))}${duration}`;

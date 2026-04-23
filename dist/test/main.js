@@ -522,7 +522,7 @@ export default [
         await sleep(10);
         const frame = getLastFrame();
         assert.match(frame, /0\/2/);
-        assert.doesNotMatch(frame, /^\d{2} (…|✔|✖)/m);
+        assert.doesNotMatch(frame, /^\d{2} (…|↑|↓|✔|✖)/m);
     },
 }), test('shows current work on the matching worker line', {
     async run() {
@@ -557,11 +557,12 @@ export default [
         });
         await sleep(10);
         const lines = getLastFrame().split('\n');
-        assert.equal(lines.length, 4);
-        assert.match(lines[0], /0\/2/);
-        assert.equal(lines[1], '');
-        assert.match(lines[2], /^01 … BusySuite > first worker test \[run\]$/);
-        assert.match(lines[3], /^02 … BusySuite > second worker test \[run\]$/);
+        assert.equal(lines.length, 5);
+        assert.match(lines[0], /^\s*$/);
+        assert.match(lines[1], /0\/2/);
+        assert.match(lines[2], /^\s*$/);
+        assert.match(lines[3], /^01 … BusySuite > first worker test \[run\]$/);
+        assert.match(lines[4], /^02 … BusySuite > second worker test \[run\]$/);
     },
 }), test('keeps the last completed result visible while a worker is idle', {
     async run() {
@@ -599,11 +600,12 @@ export default [
         });
         await sleep(10);
         const lines = getLastFrame().split('\n');
-        assert.equal(lines.length, 4);
-        assert.match(lines[0], /1\/2/);
-        assert.equal(lines[1], '');
-        assert.match(lines[2], /^01 ✔ IdleSuite > finished on worker one$/);
-        assert.match(lines[3], /^02 … IdleSuite > still running on worker two \[run\]$/);
+        assert.equal(lines.length, 5);
+        assert.match(lines[0], /^\s*$/);
+        assert.match(lines[1], /1\/2/);
+        assert.match(lines[2], /^\s*$/);
+        assert.match(lines[3], /^01 ✔ IdleSuite > finished on worker one$/);
+        assert.match(lines[4], /^02 … IdleSuite > still running on worker two \[run\]$/);
     },
 }), test('reuses the same slot line for replacement workers', {
     async run() {
@@ -645,10 +647,11 @@ export default [
         });
         await sleep(10);
         let lines = getLastFrame().split('\n');
-        assert.equal(lines.length, 3);
-        assert.match(lines[0], /1\/2/);
-        assert.equal(lines[1], '');
-        assert.match(lines[2], /^01 ✖ ReplaceSuite > times out on first worker \[timeout run 100 ms, killed after 200 ms grace\] \[replacing worker\]$/);
+        assert.equal(lines.length, 4);
+        assert.match(lines[0], /^\s*$/);
+        assert.match(lines[1], /1\/2/);
+        assert.match(lines[2], /^\s*$/);
+        assert.match(lines[3], /^01 ✖ ReplaceSuite > times out on first worker \[timeout run 100 ms, killed after 200 ms grace\] \[replacing worker\]$/);
         reporter.onEvent({
             type: 'test-started',
             ...eventBase(tests[1], 'worker-9', 1),
@@ -661,10 +664,11 @@ export default [
         });
         await sleep(10);
         lines = getLastFrame().split('\n');
-        assert.equal(lines.length, 3);
-        assert.match(lines[0], /1\/2/);
-        assert.equal(lines[1], '');
-        assert.match(lines[2], /^01 … ReplaceSuite > runs on replacement worker \[run\]$/);
+        assert.equal(lines.length, 4);
+        assert.match(lines[0], /^\s*$/);
+        assert.match(lines[1], /1\/2/);
+        assert.match(lines[2], /^\s*$/);
+        assert.match(lines[3], /^01 … ReplaceSuite > runs on replacement worker \[run\]$/);
     },
 }), test('throttles redraw bursts in interactive mode', {
     async run() {

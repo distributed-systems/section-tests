@@ -63,10 +63,18 @@ function eventBase(test, workerId = 'worker-1', workerSlot = 1) {
         testName: test.name,
     };
 }
-function createReporterHarness({ renderIntervalMs = 5, workerSlots = 2, } = {}) {
+function createReporterHarness({ renderIntervalMs = 5, workerSlots = 2, showTestLogs = false, } = {}) {
     const frames = [];
     let doneCalls = 0;
     let clearCalls = 0;
+    const output = {
+        isTTY: true,
+        // Absorb run-header and log-update output so we never fall back to console and corrupt
+        // the real TTY when parallel tests use this harness.
+        write(_chunk) {
+            return true;
+        },
+    };
     const renderer = ((message) => {
         frames.push(stripAnsi(message));
     });
@@ -80,7 +88,8 @@ function createReporterHarness({ renderIntervalMs = 5, workerSlots = 2, } = {}) 
         interactive: true,
         renderIntervalMs,
         workerSlots,
-        output: { isTTY: true },
+        output,
+        showTestLogs,
         createRenderer: () => renderer,
     });
     return {
@@ -195,7 +204,7 @@ export default [
             env: process.env,
         });
         assert.equal(result.status, 0, result.stderr || result.stdout);
-        assert.match(result.stdout, /avg\/test .* \| load .* \| total .* \| avg parallelism/i);
+        assert.match(result.stdout, /Test Files.*\n.*Tests.*\n.*Duration.+\(load .*, tests .*, total .*, parallel/i);
         const lines = await readJsonLines(markerFile);
         assert.equal(lines.length, 2);
         assert.equal(lines[0].workerMarker, lines[1].workerMarker);
@@ -432,7 +441,38 @@ export default [
         assert.equal(lines.length, 2);
         assert.equal(lines[0].workerMarker, lines[1].workerMarker);
     },
-})), suite('Reporter', test('shows no worker lines before any slot has received work', {
+})), suite('Reporter', test('prints a run header as the first output in interactive mode', {
+    async run() {
+        const written = [];
+        const output = {
+            isTTY: true,
+            write(chunk) {
+                written.push(typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk));
+            },
+        };
+        const frames = [];
+        const renderer = ((message) => {
+            frames.push(stripAnsi(message));
+        });
+        renderer.done = () => { };
+        renderer.clear = () => { };
+        const reporter = new SpecReporter({
+            interactive: true,
+            output,
+            renderIntervalMs: 0,
+            workerSlots: 1,
+            createRenderer: () => renderer,
+        });
+        const testCase = createCollectedTest('hdr-1', 'h', ['HdrSuite'], '/tmp/hdr.test.mjs', 0);
+        reporter.onPlan(createPlan([testCase]));
+        assert.ok(written.length > 0, 'expected a write before the live board');
+        const header = written[0];
+        assert.match(stripAnsi(header), /RUN/);
+        assert.match(header, /v\d+\.\d+\.\d+/);
+        assert.ok(stripAnsi(header).includes(process.cwd()), 'expected run header to include the working directory');
+        assert.equal(frames.length, 0, 'header should not be routed through the log-update renderer');
+    },
+}), test('shows no worker lines before any slot has received work', {
     async run() {
         const tests = [
             createCollectedTest('slot-1', 'first slot test', ['SlotSuite'], '/tmp/slot-suite.test.mjs', 0),
@@ -664,6 +704,97 @@ export default [
         assert.equal(harness.getDoneCalls(), 1);
         assert.match(logs.join('\n'), /1 \/ 1 tests failed!/i);
         assert.match(logs.join('\n'), /run: broken slot - slot boom/i);
+    },
+}), test('buffers context test-log in interactive mode and prints after flush when showTestLogs', {
+    async run() {
+        const testCase = createCollectedTest('log-buf', 'with log', ['LogBuf'], '/tmp/log-buf.test.mjs', 0);
+        const harness = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 1,
+            showTestLogs: true,
+        });
+        harness.reporter.onPlan(createPlan([testCase]));
+        harness.reporter.onEvent({
+            type: 'test-log',
+            ...eventBase(testCase, 'worker-1', 1),
+            level: 'info',
+            message: 'structured line',
+        });
+        harness.reporter.onSummary({
+            ok: 1,
+            failed: 0,
+            total: 1,
+            durationMs: 50,
+            pass: true,
+            records: [{
+                    test: testCase,
+                    events: [],
+                    status: 'passed',
+                    durationMs: 10,
+                    prepareDurationMs: 0,
+                    teardownStatus: 'not-needed',
+                }],
+        });
+        const logs = await captureConsoleLogs(() => {
+            harness.reporter.flush();
+        });
+        assert.match(logs.join('\n'), /Test log \(from context\)/i);
+        assert.match(logs.join('\n'), /structured line/);
+        assert.match(logs.join('\n'), /LogBuf > with log/);
+    },
+}), test('does not print buffered test-log at end when showTestLogs is off', {
+    async run() {
+        const testCase = createCollectedTest('log-off', 'no tail log', ['LogOff'], '/tmp/log-off.test.mjs', 0);
+        const harness = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 1,
+            showTestLogs: false,
+        });
+        harness.reporter.onPlan(createPlan([testCase]));
+        harness.reporter.onEvent({
+            type: 'test-log',
+            ...eventBase(testCase, 'worker-1', 1),
+            level: 'info',
+            message: 'should not appear in flush output',
+        });
+        harness.reporter.onSummary({
+            ok: 1,
+            failed: 0,
+            total: 1,
+            durationMs: 10,
+            pass: true,
+            records: [{
+                    test: testCase,
+                    events: [],
+                    status: 'passed',
+                    durationMs: 1,
+                    prepareDurationMs: 0,
+                    teardownStatus: 'not-needed',
+                }],
+        });
+        const logs = await captureConsoleLogs(() => {
+            harness.reporter.flush();
+        });
+        assert.doesNotMatch(logs.join('\n'), /Test log \(from context\)/i);
+    },
+}), test('prints test-log when not interactive and showTestLogs is on', {
+    async run() {
+        const testCase = createCollectedTest('log-ni', 'ni', ['Ni'], '/tmp/ni.test.mjs', 0);
+        const reporter = new SpecReporter({
+            interactive: false,
+            output: { isTTY: false },
+            showTestLogs: true,
+        });
+        reporter.onPlan(createPlan([testCase]));
+        const logs = await captureConsoleLogs(() => {
+            reporter.onEvent({
+                type: 'test-log',
+                ...eventBase(testCase, 'worker-1', 1),
+                level: 'warn',
+                message: 'immediate',
+            });
+        });
+        assert.match(logs.join('\n'), /immediate/);
     },
 })));
 //# sourceMappingURL=main.js.map

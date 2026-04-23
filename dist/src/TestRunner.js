@@ -6,11 +6,14 @@ import SpecReporter from './SpecReporter.js';
 import { collectTestPlan } from './collection.js';
 export const SECTION_TESTS_JSON_SUMMARY_PREFIX = 'SECTION_TESTS_SUMMARY:';
 export default class TestRunner {
-    constructor({ patterns, jsonSummary = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, }) {
+    constructor({ patterns, jsonSummary = false, showTestLogs = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, }) {
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
+        this.showTestLogs = showTestLogs;
         this.jobs = Math.max(1, jobs);
-        this.reporters = reporters.length ? reporters : [new SpecReporter({ workerSlots: this.jobs })];
+        this.reporters = reporters.length
+            ? reporters
+            : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
         this.timeoutPolicy = {
             defaultTimeoutMs,
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,

@@ -332,7 +332,9 @@ async function executeTest(test: CollectedTest): Promise<void> {
                     failurePhase = err.timeout.phase;
                 } else {
                     failure = serializeError(err);
-                    failurePhase = failurePhase || (setupCompleted ? 'run' : 'setup');
+                    if (!failurePhase) {
+                        failurePhase = !definition.setup ? 'run' : (setupCompleted ? 'run' : 'setup');
+                    }
                 }
             }
         } finally {

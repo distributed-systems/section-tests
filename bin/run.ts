@@ -3,6 +3,7 @@ import TestRunner from '../src/TestRunner.js';
 
 const argv = process.argv.slice(2);
 const jsonSummary = argv.includes('--json-summary') || process.env.SECTION_TESTS_JSON_SUMMARY === '1';
+const showTestLogs = argv.includes('--test-logs') || process.env.SECTION_TESTS_TEST_LOGS === '1';
 const jobsFlag = argv.find((value) => value.startsWith('--jobs='));
 const jobsIndex = argv.findIndex((value) => value === '--jobs');
 const jobsValue = jobsFlag
@@ -30,6 +31,7 @@ const timeoutGrace = timeoutGraceValue ? Number.parseInt(timeoutGraceValue, 10) 
 const patterns = argv.filter((value, index) => {
     if (!value) return false;
     if (value === '--json-summary') return false;
+    if (value === '--test-logs') return false;
     if (value.startsWith('--jobs=')) return false;
     if (value === '--jobs') return false;
     if (jobsIndex >= 0 && index === jobsIndex + 1) return false;
@@ -45,6 +47,7 @@ const patterns = argv.filter((value, index) => {
 new TestRunner({
     patterns,
     jsonSummary,
+    showTestLogs,
     jobs,
     defaultTimeoutMs: timeout,
     timeoutGraceMs: timeoutGrace,

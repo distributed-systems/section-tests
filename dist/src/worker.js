@@ -257,7 +257,9 @@ async function executeTest(test) {
                 }
                 else {
                     failure = serializeError(err);
-                    failurePhase = failurePhase || (setupCompleted ? 'run' : 'setup');
+                    if (!failurePhase) {
+                        failurePhase = !definition.setup ? 'run' : (setupCompleted ? 'run' : 'setup');
+                    }
                 }
             }
         }

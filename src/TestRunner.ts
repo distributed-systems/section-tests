@@ -30,6 +30,8 @@ interface TestRunnerOptions {
     reporters?: Reporter[];
     defaultTimeoutMs?: number;
     timeoutGraceMs?: number;
+    /** Print buffered context / test-log output after the run. Off by default. */
+    showTestLogs?: boolean;
 }
 
 interface WorkerJobState {
@@ -59,6 +61,7 @@ export default class TestRunner {
     patterns: string[];
     files?: string[];
     jsonSummary: boolean;
+    showTestLogs: boolean;
     jobs: number;
     reporters: Reporter[];
     timeoutPolicy: TimeoutPolicy;
@@ -71,6 +74,7 @@ export default class TestRunner {
     constructor({
         patterns,
         jsonSummary = false,
+        showTestLogs = false,
         jobs = Math.max(1, availableParallelism()),
         reporters = [],
         defaultTimeoutMs = DEFAULT_TEST_TIMEOUT,
@@ -78,8 +82,11 @@ export default class TestRunner {
     }: TestRunnerOptions) {
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
+        this.showTestLogs = showTestLogs;
         this.jobs = Math.max(1, jobs);
-        this.reporters = reporters.length ? reporters : [new SpecReporter({ workerSlots: this.jobs })];
+        this.reporters = reporters.length
+            ? reporters
+            : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
         this.timeoutPolicy = {
             defaultTimeoutMs,
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,

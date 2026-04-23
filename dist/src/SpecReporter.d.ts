@@ -9,6 +9,8 @@ interface SpecReporterOptions {
     renderIntervalMs?: number;
     workerSlots?: number;
     createRenderer?: (stream: NodeJS.WriteStream) => Renderer;
+    /** When true, show buffered `context` / test-log output after the run (and in CI). Default false. */
+    showTestLogs?: boolean;
 }
 export default class SpecReporter implements Reporter {
     private plan?;
@@ -22,8 +24,11 @@ export default class SpecReporter implements Reporter {
     private readonly renderIntervalMs;
     private configuredWorkerSlots;
     private renderTimer;
-    constructor({ interactive, output, renderIntervalMs, workerSlots, createRenderer, }?: SpecReporterOptions);
+    private bufferedTestLogs;
+    private readonly showTestLogs;
+    constructor({ interactive, output, renderIntervalMs, workerSlots, createRenderer, showTestLogs, }?: SpecReporterOptions);
     setWorkerSlots(workerSlots: number): void;
+    private printRunHeader;
     onPlan(plan: TestPlan): void;
     onEvent(event: TestEvent): void;
     onSummary(summary: TestRunSummary): void;
@@ -34,8 +39,13 @@ export default class SpecReporter implements Reporter {
     private renderInteractiveBoard;
     private renderSlotLines;
     private displayFinishedRecord;
+    private printTestLog;
+    private formatTestLogLevel;
+    private displayBufferedTestLogs;
     private displayFailureDetails;
-    private buildStatsLine;
+    private displayEndSummary;
+    /** Wall-clock duration in short form, e.g. 12.17s or 125 ms. */
+    private formatDurationClock;
     private displayWorkerTerminationEvent;
     private formatSlotLine;
     private formatRecordLine;

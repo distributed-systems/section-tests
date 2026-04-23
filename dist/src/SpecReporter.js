@@ -87,7 +87,9 @@ function readSectionTestsVersion() {
     return cachedPackageVersion;
 }
 class SpecReporter {
-    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream, {
+    constructor({ interactive, output = process.stdout, 
+    /** Cap repaint rate for TTY. Lower = snappier; 0 = render on every event (no throttle). */
+    renderIntervalMs = 16, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream, {
         defaultWidth: resolveLogUpdateWidth(stream),
         defaultHeight: resolveLogUpdateHeight(stream),
     }), showTestLogs = false, } = {}) {
@@ -279,6 +281,13 @@ class SpecReporter {
             this.displayFailureDetails();
         }
     }
+    /**
+     * Throttle interactive redraws: when many reporter events land in the same turn (e.g. parallel
+     * workers), we only schedule one `setTimeout` until it fires, so the board updates in bursts, not
+     * once per event — that is intentional and can look like "step" updates. The `log-update` buffer
+     * also wraps the frame to `columns` and clips from the *top* if wrapped lines exceed `rows`,
+     * which in a short or narrow terminal can look like a fixed viewport / missing progress line.
+     */
     scheduleRender() {
         if (!this.interactive)
             return;

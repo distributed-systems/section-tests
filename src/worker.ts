@@ -193,6 +193,20 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
     let prepareDurationMs = 0;
 
+    // Emit `test-started` BEFORE the (potentially slow) file import / definition lookup so the
+    // reporter can immediately show the new test on this slot. Otherwise the slot keeps showing the
+    // previously finished (green ✔) test until `getDefinition` resolves, which under parallel load
+    // makes all 16 slots appear to swap in unison once their imports complete.
+    emit({
+        type: 'test-started',
+        workerId,
+        testId: test.id,
+        file: test.file,
+        suitePath: test.suitePath,
+        testName: test.name,
+        mode: test.mode,
+    });
+
     try {
         const resolved = await getDefinition(test);
         const definition = resolved.definition;
@@ -274,16 +288,6 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
             return timeoutInfo;
         };
-
-        emitEvent({
-            type: 'test-started',
-            workerId,
-            testId: test.id,
-            file: test.file,
-            suitePath: test.suitePath,
-            testName: test.name,
-            mode: test.mode,
-        });
 
         try {
             if (definition.setup) {

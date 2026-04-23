@@ -28,13 +28,22 @@ export default class SpecReporter implements Reporter {
     private readonly showTestLogs;
     private totalTestsPlanned;
     private testsFinished;
-    constructor({ interactive, output, renderIntervalMs, workerSlots, createRenderer, showTestLogs, }?: SpecReporterOptions);
+    constructor({ interactive, output, 
+    /** Cap repaint rate for TTY. Lower = snappier; 0 = render on every event (no throttle). */
+    renderIntervalMs, workerSlots, createRenderer, showTestLogs, }?: SpecReporterOptions);
     setWorkerSlots(workerSlots: number): void;
     private printRunHeader;
     onPlan(plan: TestPlan): void;
     onEvent(event: TestEvent): void;
     onSummary(summary: TestRunSummary): void;
     flush(): void;
+    /**
+     * Throttle interactive redraws: when many reporter events land in the same turn (e.g. parallel
+     * workers), we only schedule one `setTimeout` until it fires, so the board updates in bursts, not
+     * once per event — that is intentional and can look like "step" updates. The `log-update` buffer
+     * also wraps the frame to `columns` and clips from the *top* if wrapped lines exceed `rows`,
+     * which in a short or narrow terminal can look like a fixed viewport / missing progress line.
+     */
     private scheduleRender;
     private renderNow;
     private clearPendingRender;

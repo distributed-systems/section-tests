@@ -14,10 +14,12 @@ export default class SpecReporter implements Reporter {
     private renderInteractiveBoard;
     private displayFinishedRecord;
     private displayFailureDetails;
+    private buildStatsLine;
     private displayWorkerTerminationEvent;
     private formatRecordLine;
     private getCurrentPhase;
     private formatDuration;
+    private formatStatDuration;
     private pad;
 }
 //# sourceMappingURL=SpecReporter.d.ts.map

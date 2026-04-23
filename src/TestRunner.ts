@@ -116,6 +116,12 @@ export default class TestRunner {
         const parallelTests = plan.tests.filter((test) => test.mode !== 'serial');
         const serialTests = plan.tests.filter((test) => test.mode === 'serial');
 
+        console.log(
+            `Running ${plan.tests.length} tests with up to ${this.jobs} in parallel`
+            + (serialTests.length ? ` (${serialTests.length} serial)` : ''),
+        );
+        console.log('');
+
         await this.executeQueue(parallelTests, this.jobs, handleEvent);
         await this.executeQueue(serialTests, 1, handleEvent);
         await this.drainTimedOutWorkers(handleEvent);

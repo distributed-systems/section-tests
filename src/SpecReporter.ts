@@ -97,9 +97,13 @@ export default class SpecReporter implements Reporter {
 
         if (this.summary.failed > 0) {
             console.log(`\n${chalk.yellow(`${this.summary.failed} / ${this.summary.total} tests failed!`)}\n`);
+            console.log(this.buildStatsLine());
+            console.log('');
             this.displayFailureDetails();
         } else {
             console.log(`\n${chalk.green.bold(`${this.summary.total} tests executed successfully`)}\n`);
+            console.log(this.buildStatsLine());
+            console.log('');
         }
     }
 
@@ -141,6 +145,22 @@ export default class SpecReporter implements Reporter {
 
             console.log('');
         }
+    }
+
+    private buildStatsLine(): string {
+        if (!this.summary) return '';
+
+        const totalDurationMs = this.summary.durationMs;
+        const finishedRecords = this.summary.records.filter((record) => typeof record.durationMs === 'number');
+        const totalTestTimeMs = finishedRecords.reduce((sum, record) => sum + (record.durationMs || 0), 0);
+        const averagePerTestMs = finishedRecords.length > 0 ? totalTestTimeMs / finishedRecords.length : 0;
+        const averageParallelism = totalDurationMs > 0 ? totalTestTimeMs / totalDurationMs : 0;
+
+        return chalk.dim(
+            `avg/test ${this.formatStatDuration(averagePerTestMs)}`
+            + ` | total ${this.formatStatDuration(totalDurationMs)}`
+            + ` | avg parallelism ${averageParallelism.toFixed(2)}x`,
+        );
     }
 
     private displayWorkerTerminationEvent(record: TestExecutionRecord): void {
@@ -198,6 +218,14 @@ export default class SpecReporter implements Reporter {
     private formatDuration(durationMs: number): string {
         if (!durationMs || durationMs < 200) return '';
         return chalk.dim(` (${durationMs} ms)`);
+    }
+
+    private formatStatDuration(durationMs: number): string {
+        if (durationMs >= 1000) {
+            return `${(durationMs / 1000).toFixed(2)} s`;
+        }
+
+        return `${Math.round(durationMs)} ms`;
     }
 
     private pad(amount: number): string {

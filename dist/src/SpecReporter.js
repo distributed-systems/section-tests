@@ -78,10 +78,14 @@ export default class SpecReporter {
             return;
         if (this.summary.failed > 0) {
             console.log(`\n${chalk.yellow(`${this.summary.failed} / ${this.summary.total} tests failed!`)}\n`);
+            console.log(this.buildStatsLine());
+            console.log('');
             this.displayFailureDetails();
         }
         else {
             console.log(`\n${chalk.green.bold(`${this.summary.total} tests executed successfully`)}\n`);
+            console.log(this.buildStatsLine());
+            console.log('');
         }
     }
     renderInteractiveBoard() {
@@ -119,6 +123,18 @@ export default class SpecReporter {
             }
             console.log('');
         }
+    }
+    buildStatsLine() {
+        if (!this.summary)
+            return '';
+        const totalDurationMs = this.summary.durationMs;
+        const finishedRecords = this.summary.records.filter((record) => typeof record.durationMs === 'number');
+        const totalTestTimeMs = finishedRecords.reduce((sum, record) => sum + (record.durationMs || 0), 0);
+        const averagePerTestMs = finishedRecords.length > 0 ? totalTestTimeMs / finishedRecords.length : 0;
+        const averageParallelism = totalDurationMs > 0 ? totalTestTimeMs / totalDurationMs : 0;
+        return chalk.dim(`avg/test ${this.formatStatDuration(averagePerTestMs)}`
+            + ` | total ${this.formatStatDuration(totalDurationMs)}`
+            + ` | avg parallelism ${averageParallelism.toFixed(2)}x`);
     }
     displayWorkerTerminationEvent(record) {
         if (!record.workerTermination?.forced)
@@ -167,6 +183,12 @@ export default class SpecReporter {
         if (!durationMs || durationMs < 200)
             return '';
         return chalk.dim(` (${durationMs} ms)`);
+    }
+    formatStatDuration(durationMs) {
+        if (durationMs >= 1000) {
+            return `${(durationMs / 1000).toFixed(2)} s`;
+        }
+        return `${Math.round(durationMs)} ms`;
     }
     pad(amount) {
         return ' '.repeat(amount);

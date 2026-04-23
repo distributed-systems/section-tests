@@ -3,6 +3,56 @@ import { fileURLToPath } from 'node:url';
 import { createLogUpdate } from 'log-update';
 import chalk from './lib/chalk.js';
 let cachedPackageVersion;
+/**
+ * `log-update` falls back to width 80 when `stream.columns` is missing. Prefer the
+ * real TTY size when available, then `COLUMNS`, then a wide fallback.
+ */
+function resolveLogUpdateWidth(stream) {
+    const col = stream.columns;
+    if (typeof col === 'number' && col > 0) {
+        return col;
+    }
+    const withSize = stream;
+    if (typeof withSize.getWindowSize === 'function') {
+        try {
+            const [w] = withSize.getWindowSize();
+            if (typeof w === 'number' && w > 0) {
+                return w;
+            }
+        }
+        catch {
+            // ignore
+        }
+    }
+    const fromEnv = Number.parseInt(process.env.COLUMNS ?? '', 10);
+    if (Number.isFinite(fromEnv) && fromEnv > 0) {
+        return fromEnv;
+    }
+    return 256;
+}
+function resolveLogUpdateHeight(stream) {
+    const row = stream.rows;
+    if (typeof row === 'number' && row > 0) {
+        return row;
+    }
+    const withSize = stream;
+    if (typeof withSize.getWindowSize === 'function') {
+        try {
+            const [, h] = withSize.getWindowSize();
+            if (typeof h === 'number' && h > 0) {
+                return h;
+            }
+        }
+        catch {
+            // ignore
+        }
+    }
+    const fromEnv = Number.parseInt(process.env.LINES ?? process.env.ROWS ?? '', 10);
+    if (Number.isFinite(fromEnv) && fromEnv > 0) {
+        return fromEnv;
+    }
+    return 24;
+}
 function readSectionTestsVersion() {
     if (cachedPackageVersion)
         return cachedPackageVersion;
@@ -17,7 +67,10 @@ function readSectionTestsVersion() {
     return cachedPackageVersion;
 }
 export default class SpecReporter {
-    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream), showTestLogs = false, } = {}) {
+    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream, {
+        defaultWidth: resolveLogUpdateWidth(stream),
+        defaultHeight: resolveLogUpdateHeight(stream),
+    }), showTestLogs = false, } = {}) {
         this.records = new Map();
         this.slotStates = new Map();
         this.workerIdToSlot = new Map();

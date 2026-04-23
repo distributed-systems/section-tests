@@ -17,6 +17,62 @@ type Renderer = ((message: string) => void) & { done: () => void; clear: () => v
 
 let cachedPackageVersion: string | undefined;
 
+/**
+ * `log-update` falls back to width 80 when `stream.columns` is missing. Prefer the
+ * real TTY size when available, then `COLUMNS`, then a wide fallback.
+ */
+function resolveLogUpdateWidth(stream: NodeJS.WriteStream): number {
+    const col = stream.columns;
+    if (typeof col === 'number' && col > 0) {
+        return col;
+    }
+
+    const withSize = stream as NodeJS.WriteStream & { getWindowSize?: () => [number, number] };
+    if (typeof withSize.getWindowSize === 'function') {
+        try {
+            const [w] = withSize.getWindowSize();
+            if (typeof w === 'number' && w > 0) {
+                return w;
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    const fromEnv = Number.parseInt(process.env.COLUMNS ?? '', 10);
+    if (Number.isFinite(fromEnv) && fromEnv > 0) {
+        return fromEnv;
+    }
+
+    return 256;
+}
+
+function resolveLogUpdateHeight(stream: NodeJS.WriteStream): number {
+    const row = stream.rows;
+    if (typeof row === 'number' && row > 0) {
+        return row;
+    }
+
+    const withSize = stream as NodeJS.WriteStream & { getWindowSize?: () => [number, number] };
+    if (typeof withSize.getWindowSize === 'function') {
+        try {
+            const [, h] = withSize.getWindowSize();
+            if (typeof h === 'number' && h > 0) {
+                return h;
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    const fromEnv = Number.parseInt(process.env.LINES ?? process.env.ROWS ?? '', 10);
+    if (Number.isFinite(fromEnv) && fromEnv > 0) {
+        return fromEnv;
+    }
+
+    return 24;
+}
+
 function readSectionTestsVersion(): string {
     if (cachedPackageVersion) return cachedPackageVersion;
     try {
@@ -88,7 +144,11 @@ export default class SpecReporter implements Reporter {
         output = process.stdout,
         renderIntervalMs = 50,
         workerSlots = 0,
-        createRenderer = (stream) => createLogUpdate(stream) as Renderer,
+        createRenderer = (stream) =>
+            createLogUpdate(stream, {
+                defaultWidth: resolveLogUpdateWidth(stream),
+                defaultHeight: resolveLogUpdateHeight(stream),
+            }) as Renderer,
         showTestLogs = false,
     }: SpecReporterOptions = {}) {
         this.output = output;

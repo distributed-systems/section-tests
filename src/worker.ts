@@ -88,6 +88,33 @@ async function runWithTimeout<T>(
     });
 }
 
+const runPhaseTimeBudgetExceeded = Object.freeze({ reason: 'run-phase-time-budget' as const });
+
+/** After a run timeout, wait for the in-flight run promise; return `stuck` if it is still not settled. */
+function waitForRunToSettleOrStuck(
+    runTask: Promise<unknown>,
+    quiesceMs: number,
+): Promise<'settled' | 'stuck'> {
+    if (quiesceMs <= 0) {
+        return Promise.resolve('stuck');
+    }
+    return new Promise((resolve) => {
+        let done = false;
+        const onDeadline = setTimeout(() => {
+            if (!done) {
+                done = true;
+                resolve('stuck');
+            }
+        }, quiesceMs);
+        runTask.finally(() => {
+            if (done) return;
+            done = true;
+            clearTimeout(onDeadline);
+            resolve('settled');
+        });
+    });
+}
+
 interface FileCacheEntry {
     entries: TestEntry[];
     definitions: Map<string, TestDefinition>;
@@ -210,6 +237,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
         let failurePhase: TestPhase | 'worker' | undefined;
         let timeout: TimeoutInfo | undefined;
         let retireReason: WorkerRetireReason | undefined;
+        let runStuckAfterQuiesce = false;
 
         currentExecution = {
             test,
@@ -302,29 +330,46 @@ async function executeTest(test: CollectedTest): Promise<void> {
                 testName: test.name,
             });
 
-            await runWithTimeout(
-                async () => {
-                    if (definition.setup) await (definition.run as any)(setupResult, context);
-                    else await (definition.run as any)(context);
-                },
-                {
-                    phase: 'run',
-                    timeoutMs: test.timeout,
-                },
-                () => {
-                    emitTimeout('run');
-                },
-            );
+            const runTask = (async () => {
+                if (definition.setup) await (definition.run as any)(setupResult, context);
+                else await (definition.run as any)(context);
+            })();
 
-            emitEvent({
-                type: 'phase-finished',
-                workerId,
-                phase: 'run',
-                testId: test.id,
-                file: test.file,
-                suitePath: test.suitePath,
-                testName: test.name,
-            });
+            const runPhaseOutcome = await Promise.race([
+                runTask.then(() => 'ok' as const),
+                new Promise<typeof runPhaseTimeBudgetExceeded>((resolve) => {
+                    setTimeout(() => resolve(runPhaseTimeBudgetExceeded), test.timeout);
+                }),
+            ]);
+
+            if (runPhaseOutcome === runPhaseTimeBudgetExceeded) {
+                emitTimeout('run');
+                if (!failure) {
+                    const runTimeoutInfo: TimeoutInfo = { phase: 'run', timeoutMs: test.timeout };
+                    failure = serializeTimeoutFailure(runTimeoutInfo);
+                    failurePhase = 'run';
+                }
+                const quiesceMs = test.timeout * 2;
+                if (quiesceMs > 0) {
+                    const settledOrStuck = await waitForRunToSettleOrStuck(runTask, quiesceMs);
+                    if (settledOrStuck === 'stuck') {
+                        runStuckAfterQuiesce = true;
+                    }
+                } else {
+                    runStuckAfterQuiesce = true;
+                }
+            } else {
+                await runTask;
+                emitEvent({
+                    type: 'phase-finished',
+                    workerId,
+                    phase: 'run',
+                    testId: test.id,
+                    file: test.file,
+                    suitePath: test.suitePath,
+                    testName: test.name,
+                });
+            }
         } catch (err) {
             if (!failure) {
                 if (err instanceof PhaseTimeoutError) {
@@ -339,7 +384,12 @@ async function executeTest(test: CollectedTest): Promise<void> {
             }
         } finally {
             try {
-                if (definition.teardown && (!definition.setup || setupCompleted)) {
+                // After a `run` timeout we wait up to `2 * test.timeout` for the run promise to
+                // settle. If it is still pending, teardown is unsafe; skip it and let the parent
+                // retire/kill the worker. Otherwise teardown runs.
+                if (runStuckAfterQuiesce && definition.teardown) {
+                    teardownStatus = 'skipped';
+                } else if (definition.teardown && (!definition.setup || setupCompleted)) {
                     emitEvent({
                         type: 'phase-started',
                         workerId,

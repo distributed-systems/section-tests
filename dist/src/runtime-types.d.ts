@@ -1,7 +1,9 @@
 export type TestMode = 'parallel' | 'serial';
 export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'notice';
 export type TestPhase = 'setup' | 'run' | 'teardown';
-export type TeardownStatus = 'not-needed' | 'not-run' | 'completed' | 'failed' | 'timed-out' | 'interrupted';
+export type TeardownStatus = 'not-needed' | 'not-run' | 'completed' | 'failed' | 'timed-out' | 'interrupted'
+/** Teardown not run: `run` did not finish within 2× the test timeout after a run timeout. */
+ | 'skipped';
 export type WorkerRetireReason = 'timeout' | 'teardown-failed' | 'unexpected-error' | 'protocol-violation' | 'hygiene';
 export interface TestContext {
     file: string;

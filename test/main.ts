@@ -376,7 +376,49 @@ export default [
             },
         }),
 
-        test('attempts teardown after a run timeout', {
+        test('runs teardown if the timed-out `run` promise settles within 2× the test timeout', {
+            timeout: 15_000,
+            async run() {
+                const tempDirectory = await mkdtemp(join(tmpdir(), 'section-tests-timeout-'));
+                const markerFile = join(tempDirectory, 'teardown.txt');
+                const fixtureDirectory = await createFixtureFile('timeout-teardown-settles.test.mjs', `
+import { appendFile } from 'node:fs/promises';
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+
+export default [
+  test('long run then cleanup', {
+    timeout: 100,
+    async setup() {
+      return ${JSON.stringify(markerFile)};
+    },
+    async run() {
+      await new Promise((r) => setTimeout(r, 150));
+    },
+    async teardown(marker) {
+      await appendFile(marker, 'teardown-completed\\n');
+    },
+  }),
+];
+`);
+
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, './timeout-teardown-settles.test.mjs'],
+                    {
+                        cwd: fixtureDirectory,
+                        encoding: 'utf8',
+                        env: process.env,
+                    },
+                );
+
+                assert.equal(result.status, 1, 'timed out tests should exit non-zero');
+                assert.doesNotMatch(result.stdout, /teardown skipped/i);
+                const markerContents = await readFile(markerFile, 'utf8');
+                assert.match(markerContents, /teardown-completed/);
+            },
+        }),
+
+        test('skips teardown when run is still pending after 2× timeout quiesce', {
             timeout: 15_000,
             async run() {
                 const tempDirectory = await mkdtemp(join(tmpdir(), 'section-tests-timeout-'));
@@ -386,7 +428,7 @@ import { appendFile } from 'node:fs/promises';
 import { test } from ${JSON.stringify(sectionTestsImportUrl)};
 
 export default [
-  test('times out and cleans up', {
+  test('times out and never settles', {
     timeout: 120,
     async setup() {
       return ${JSON.stringify(markerFile)};
@@ -412,11 +454,11 @@ export default [
                 );
 
                 assert.equal(result.status, 1, 'timed out tests should exit non-zero');
-                assert.match(result.stdout, /\[timeout run 120 ms, teardown completed\]/i);
-                assert.match(result.stdout, /teardown completed/i);
+                assert.match(result.stdout, /teardown skipped/i);
+                assert.match(result.stdout, /timeout run 120 ms/i);
+                assert.doesNotMatch(result.stdout, /teardown-completed/i);
 
-                const markerContents = await readFile(markerFile, 'utf8');
-                assert.match(markerContents, /teardown-completed/);
+                await assert.rejects(() => readFile(markerFile, 'utf8'), { code: 'ENOENT' });
             },
         }),
 
@@ -515,10 +557,10 @@ export default [
                 assert.ok(elapsedMs >= 300, `expected timeout grace to be respected, got ${elapsedMs}`);
 
                 const lines = await readJsonLines(markerFile);
+                assert.equal(lines.length, 2, 'run timeout skips teardown; expect first + second test only');
                 assert.equal(lines[0].test, 'first');
-                assert.equal(lines[1].test, 'teardown');
-                assert.equal(lines[2].test, 'second');
-                assert.notEqual(lines[0].workerMarker, lines[2].workerMarker);
+                assert.equal(lines[1].test, 'second');
+                assert.notEqual(lines[0].workerMarker, lines[1].workerMarker);
             },
         }),
 

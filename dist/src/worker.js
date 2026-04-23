@@ -54,6 +54,29 @@ async function runWithTimeout(execute, timeout, onTimeout) {
         });
     });
 }
+const runPhaseTimeBudgetExceeded = Object.freeze({ reason: 'run-phase-time-budget' });
+/** After a run timeout, wait for the in-flight run promise; return `stuck` if it is still not settled. */
+function waitForRunToSettleOrStuck(runTask, quiesceMs) {
+    if (quiesceMs <= 0) {
+        return Promise.resolve('stuck');
+    }
+    return new Promise((resolve) => {
+        let done = false;
+        const onDeadline = setTimeout(() => {
+            if (!done) {
+                done = true;
+                resolve('stuck');
+            }
+        }, quiesceMs);
+        runTask.finally(() => {
+            if (done)
+                return;
+            done = true;
+            clearTimeout(onDeadline);
+            resolve('settled');
+        });
+    });
+}
 const port = requireParentPort();
 const { workerId } = workerData;
 const fileCache = new Map();
@@ -151,6 +174,7 @@ async function executeTest(test) {
         let failurePhase;
         let timeout;
         let retireReason;
+        let runStuckAfterQuiesce = false;
         currentExecution = {
             test,
             markUnexpectedFailure: (err) => {
@@ -228,26 +252,48 @@ async function executeTest(test) {
                 suitePath: test.suitePath,
                 testName: test.name,
             });
-            await runWithTimeout(async () => {
+            const runTask = (async () => {
                 if (definition.setup)
                     await definition.run(setupResult, context);
                 else
                     await definition.run(context);
-            }, {
-                phase: 'run',
-                timeoutMs: test.timeout,
-            }, () => {
+            })();
+            const runPhaseOutcome = await Promise.race([
+                runTask.then(() => 'ok'),
+                new Promise((resolve) => {
+                    setTimeout(() => resolve(runPhaseTimeBudgetExceeded), test.timeout);
+                }),
+            ]);
+            if (runPhaseOutcome === runPhaseTimeBudgetExceeded) {
                 emitTimeout('run');
-            });
-            emitEvent({
-                type: 'phase-finished',
-                workerId,
-                phase: 'run',
-                testId: test.id,
-                file: test.file,
-                suitePath: test.suitePath,
-                testName: test.name,
-            });
+                if (!failure) {
+                    const runTimeoutInfo = { phase: 'run', timeoutMs: test.timeout };
+                    failure = serializeTimeoutFailure(runTimeoutInfo);
+                    failurePhase = 'run';
+                }
+                const quiesceMs = test.timeout * 2;
+                if (quiesceMs > 0) {
+                    const settledOrStuck = await waitForRunToSettleOrStuck(runTask, quiesceMs);
+                    if (settledOrStuck === 'stuck') {
+                        runStuckAfterQuiesce = true;
+                    }
+                }
+                else {
+                    runStuckAfterQuiesce = true;
+                }
+            }
+            else {
+                await runTask;
+                emitEvent({
+                    type: 'phase-finished',
+                    workerId,
+                    phase: 'run',
+                    testId: test.id,
+                    file: test.file,
+                    suitePath: test.suitePath,
+                    testName: test.name,
+                });
+            }
         }
         catch (err) {
             if (!failure) {
@@ -265,7 +311,13 @@ async function executeTest(test) {
         }
         finally {
             try {
-                if (definition.teardown && (!definition.setup || setupCompleted)) {
+                // After a `run` timeout we wait up to `2 * test.timeout` for the run promise to
+                // settle. If it is still pending, teardown is unsafe; skip it and let the parent
+                // retire/kill the worker. Otherwise teardown runs.
+                if (runStuckAfterQuiesce && definition.teardown) {
+                    teardownStatus = 'skipped';
+                }
+                else if (definition.teardown && (!definition.setup || setupCompleted)) {
                     emitEvent({
                         type: 'phase-started',
                         workerId,

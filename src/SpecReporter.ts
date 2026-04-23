@@ -578,11 +578,11 @@ export default class SpecReporter implements Reporter {
         console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
     }
 
-    /** Leading glyph for an in-flight test: setup ↑, teardown ↓, run / not yet phased …. */
+    /** Styled leading glyph: setup ↑ dim, teardown ↓ dim, run / not yet phased ▸ cyan. */
     private inProgressGlyph(phase?: TestPhase): string {
-        if (phase === 'setup') return '↑';
-        if (phase === 'teardown') return '↓';
-        return '…';
+        if (phase === 'setup') return chalk.dim('↑');
+        if (phase === 'teardown') return chalk.dim('↓');
+        return chalk.cyan('▸');
     }
 
     private formatSlotLine(slotState: SlotState): string {
@@ -600,7 +600,7 @@ export default class SpecReporter implements Reporter {
                 );
             }
             return truncateAnsiLineToWidth(
-                `${prefix} ${chalk.dim(this.inProgressGlyph(phase))} ${chalk.white(this.describeTest(r))}${phaseSuffix}`,
+                `${prefix} ${this.inProgressGlyph(phase)} ${chalk.white(this.describeTest(r))}${phaseSuffix}`,
                 w,
             );
         }
@@ -625,8 +625,7 @@ export default class SpecReporter implements Reporter {
         const duration = this.formatDuration(record.durationMs || 0);
 
         if (!record.status) {
-            const g = this.inProgressGlyph(record.currentPhase);
-            return `${chalk.dim(g)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
+            return `${this.inProgressGlyph(record.currentPhase)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
         }
 
         if (record.status === 'passed') {

@@ -664,7 +664,7 @@ export default [
 
                 const frame = getLastFrame();
                 assert.match(frame, /0\/2/);
-                assert.doesNotMatch(frame, /^\d{2} (…|↑|↓|✔|✖)/m);
+                assert.doesNotMatch(frame, /^\d{2} (▸|↑|↓|✔|✖)/m);
             },
         }),
 
@@ -708,8 +708,8 @@ export default [
                 assert.match(lines[0], /^\s*$/);
                 assert.match(lines[1], /0\/2/);
                 assert.match(lines[2], /^\s*$/);
-                assert.match(lines[3], /^01 … BusySuite > first worker test \[run\]$/);
-                assert.match(lines[4], /^02 … BusySuite > second worker test \[run\]$/);
+                assert.match(lines[3], /^01 ▸ BusySuite > first worker test \[run\]$/);
+                assert.match(lines[4], /^02 ▸ BusySuite > second worker test \[run\]$/);
             },
         }),
 
@@ -757,7 +757,7 @@ export default [
                 assert.match(lines[1], /1\/2/);
                 assert.match(lines[2], /^\s*$/);
                 assert.match(lines[3], /^01 ✔ IdleSuite > finished on worker one$/);
-                assert.match(lines[4], /^02 … IdleSuite > still running on worker two \[run\]$/);
+                assert.match(lines[4], /^02 ▸ IdleSuite > still running on worker two \[run\]$/);
             },
         }),
 
@@ -827,7 +827,7 @@ export default [
                 assert.match(lines[0], /^\s*$/);
                 assert.match(lines[1], /1\/2/);
                 assert.match(lines[2], /^\s*$/);
-                assert.match(lines[3], /^01 … ReplaceSuite > runs on replacement worker \[run\]$/);
+                assert.match(lines[3], /^01 ▸ ReplaceSuite > runs on replacement worker \[run\]$/);
             },
         }),
 

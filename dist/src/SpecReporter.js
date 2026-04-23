@@ -464,13 +464,13 @@ class SpecReporter {
             return;
         console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
     }
-    /** Leading glyph for an in-flight test: setup ↑, teardown ↓, run / not yet phased …. */
+    /** Styled leading glyph: setup ↑ dim, teardown ↓ dim, run / not yet phased ▸ cyan. */
     inProgressGlyph(phase) {
         if (phase === 'setup')
-            return '↑';
+            return chalk.dim('↑');
         if (phase === 'teardown')
-            return '↓';
-        return '…';
+            return chalk.dim('↓');
+        return chalk.cyan('▸');
     }
     formatSlotLine(slotState) {
         const prefix = chalk.dim(`${slotState.slot.toString().padStart(2, '0')}`);
@@ -482,7 +482,7 @@ class SpecReporter {
             if (phase === 'teardown' && r.runPhaseCompletedOk) {
                 return truncateAnsiLineToWidth(`${prefix} ${chalk.green('✔')} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
             }
-            return truncateAnsiLineToWidth(`${prefix} ${chalk.dim(this.inProgressGlyph(phase))} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
+            return truncateAnsiLineToWidth(`${prefix} ${this.inProgressGlyph(phase)} ${chalk.white(this.describeTest(r))}${phaseSuffix}`, w);
         }
         if (slotState.lastRecord) {
             const lastLine = this.formatRecordLine(slotState.lastRecord);
@@ -499,8 +499,7 @@ class SpecReporter {
     formatRecordLine(record) {
         const duration = this.formatDuration(record.durationMs || 0);
         if (!record.status) {
-            const g = this.inProgressGlyph(record.currentPhase);
-            return `${chalk.dim(g)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
+            return `${this.inProgressGlyph(record.currentPhase)} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
         }
         if (record.status === 'passed') {
             return `${chalk.green('✔')} ${chalk.white(this.describeTest(record))}${duration}`;

@@ -1,15 +1,23 @@
 import process from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
-import { resolveCollectedTest } from './collection.js';
+import { collectEntriesFromFile, resolveCollectedTestFromEntries } from './collection.js';
 import {
     CollectedTest,
     LogLevel,
     SerializedError,
     TeardownStatus,
     TestContext,
+    TestDefinition,
+    TestEntry,
     TestEvent,
+    TestFinishedEvent,
     TestPhase,
     TimeoutInfo,
+    WorkerBootstrapData,
+    WorkerCommand,
+    WorkerLifecycleMessage,
+    WorkerMessage,
+    WorkerRetireReason,
 } from './runtime-types.js';
 
 function requireParentPort() {
@@ -80,252 +88,381 @@ async function runWithTimeout<T>(
     });
 }
 
-async function main(): Promise<void> {
-    const port = requireParentPort();
-    const collectedTest = workerData as CollectedTest;
-    const definition = await resolveCollectedTest(collectedTest);
-    const controller = new AbortController();
+interface FileCacheEntry {
+    entries: TestEntry[];
+    definitions: Map<string, TestDefinition>;
+}
 
-    const emit = (event: TestEvent) => {
-        port.postMessage(event);
-    };
+interface ExecutionState {
+    test: CollectedTest;
+    markUnexpectedFailure: (err: unknown) => void;
+}
 
-    const context: TestContext = {
-        file: collectedTest.file,
-        testName: collectedTest.name,
-        suitePath: collectedTest.suitePath,
-        signal: controller.signal,
-        info: (message: string) => emitLog('info', message),
-        warn: (message: string) => emitLog('warn', message),
-        error: (message: string) => emitLog('error', message),
-        success: (message: string) => emitLog('success', message),
-        notice: (message: string) => emitLog('notice', message),
-        log: (level: LogLevel, message: string) => emitLog(level, message),
-    };
+const port = requireParentPort();
+const { workerId } = workerData as WorkerBootstrapData;
+const fileCache = new Map<string, FileCacheEntry>();
+let busy = false;
+let retiring = false;
+let shuttingDown = false;
+let currentExecution: ExecutionState | null = null;
 
-    function emitLog(level: LogLevel, message: string): void {
-        emit({
-            type: 'test-log',
-            testId: collectedTest.id,
-            file: collectedTest.file,
-            suitePath: collectedTest.suitePath,
-            testName: collectedTest.name,
-            level,
-            message,
-        });
+function emit(message: WorkerMessage): void {
+    port.postMessage(message);
+}
+
+function emitLifecycle(message: WorkerLifecycleMessage): void {
+    emit(message);
+}
+
+function emitRetire(reason: WorkerRetireReason, test?: CollectedTest, timeout?: TimeoutInfo): void {
+    if (retiring) return;
+    retiring = true;
+    emitLifecycle({
+        type: 'worker-retire',
+        workerId,
+        reason,
+        testId: test?.id,
+        timeout,
+    });
+}
+
+async function getDefinition(test: CollectedTest): Promise<{ definition: TestDefinition; prepareDurationMs: number }> {
+    const startedAt = Date.now();
+    let cache = fileCache.get(test.file);
+    if (!cache) {
+        cache = {
+            entries: await collectEntriesFromFile(test.file),
+            definitions: new Map(),
+        };
+        fileCache.set(test.file, cache);
     }
 
-    const startedAt = Date.now();
-    let setupResult: unknown;
-    let setupCompleted = false;
-    let teardownStatus: TeardownStatus = definition.teardown ? 'not-run' : 'not-needed';
-    let failure: SerializedError | undefined;
-    let failurePhase: TestPhase | 'worker' | undefined;
-    let timeout: TimeoutInfo | undefined;
+    let definition = cache.definitions.get(test.id);
+    if (!definition) {
+        definition = resolveCollectedTestFromEntries(cache.entries, test);
+        cache.definitions.set(test.id, definition);
+    }
 
-    const emitTimeout = (phase: TestPhase) => {
-        const timeoutInfo: TimeoutInfo = {
-            phase,
-            timeoutMs: collectedTest.timeout,
-        };
-
-        controller.abort();
-
-        if (!timeout) timeout = timeoutInfo;
-
-        emit({
-            type: 'test-timeout',
-            testId: collectedTest.id,
-            file: collectedTest.file,
-            suitePath: collectedTest.suitePath,
-            testName: collectedTest.name,
-            timeout: timeoutInfo,
-        });
-
-        return timeoutInfo;
+    return {
+        definition,
+        prepareDurationMs: Date.now() - startedAt,
     };
+}
 
-    emit({
-        type: 'test-started',
-        testId: collectedTest.id,
-        file: collectedTest.file,
-        suitePath: collectedTest.suitePath,
-        testName: collectedTest.name,
-        mode: collectedTest.mode,
-    });
+function handleUnexpectedFailure(err: unknown): void {
+    if (currentExecution) {
+        currentExecution.markUnexpectedFailure(err);
+        return;
+    }
 
-    const handleUnexpectedFailure = (err: unknown) => {
-        failure = serializeError(err);
-        failurePhase = 'worker';
-    };
+    emitRetire('unexpected-error');
+}
 
-    process.once('unhandledRejection', handleUnexpectedFailure);
-    process.once('uncaughtException', handleUnexpectedFailure);
+process.on('unhandledRejection', handleUnexpectedFailure);
+process.on('uncaughtException', handleUnexpectedFailure);
+
+async function executeTest(test: CollectedTest): Promise<void> {
+    busy = true;
+
+    let prepareDurationMs = 0;
 
     try {
-        if (definition.setup) {
-            emit({
-                type: 'phase-started',
-                phase: 'setup',
-                testId: collectedTest.id,
-                file: collectedTest.file,
-                suitePath: collectedTest.suitePath,
-                testName: collectedTest.name,
-            });
+        const resolved = await getDefinition(test);
+        const definition = resolved.definition;
+        prepareDurationMs = resolved.prepareDurationMs;
+        const controller = new AbortController();
 
-            setupResult = await runWithTimeout(
-                () => Promise.resolve(definition.setup!(context)),
-                {
-                    phase: 'setup',
-                    timeoutMs: collectedTest.timeout,
-                },
-                () => {
-                    emitTimeout('setup');
-                },
-            );
-            setupCompleted = true;
+        const emitEvent = (event: TestEvent) => {
+            emit(event);
+        };
 
-            emit({
-                type: 'phase-finished',
-                phase: 'setup',
-                testId: collectedTest.id,
-                file: collectedTest.file,
-                suitePath: collectedTest.suitePath,
-                testName: collectedTest.name,
+        const context: TestContext = {
+            file: test.file,
+            testName: test.name,
+            suitePath: test.suitePath,
+            signal: controller.signal,
+            info: (message: string) => emitLog('info', message),
+            warn: (message: string) => emitLog('warn', message),
+            error: (message: string) => emitLog('error', message),
+            success: (message: string) => emitLog('success', message),
+            notice: (message: string) => emitLog('notice', message),
+            log: (level: LogLevel, message: string) => emitLog(level, message),
+        };
+
+        function emitLog(level: LogLevel, message: string): void {
+            emitEvent({
+                type: 'test-log',
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
+                level,
+                message,
             });
         }
 
-        emit({
-            type: 'phase-started',
-            phase: 'run',
-            testId: collectedTest.id,
-            file: collectedTest.file,
-            suitePath: collectedTest.suitePath,
-            testName: collectedTest.name,
-        });
+        const startedAt = Date.now();
+        let setupResult: unknown;
+        let setupCompleted = false;
+        let teardownStatus: TeardownStatus = definition.teardown ? 'not-run' : 'not-needed';
+        let failure: SerializedError | undefined;
+        let failurePhase: TestPhase | 'worker' | undefined;
+        let timeout: TimeoutInfo | undefined;
+        let retireReason: WorkerRetireReason | undefined;
 
-        await runWithTimeout(
-            async () => {
-                if (definition.setup) await (definition.run as any)(setupResult, context);
-                else await (definition.run as any)(context);
-            },
-            {
-                phase: 'run',
-                timeoutMs: collectedTest.timeout,
-            },
-            () => {
-                emitTimeout('run');
-            },
-        );
-
-        emit({
-            type: 'phase-finished',
-            phase: 'run',
-            testId: collectedTest.id,
-            file: collectedTest.file,
-            suitePath: collectedTest.suitePath,
-            testName: collectedTest.name,
-        });
-    } catch (err) {
-        if (!failure) {
-            if (err instanceof PhaseTimeoutError) {
-                failure = serializeTimeoutFailure(err.timeout);
-                failurePhase = err.timeout.phase;
-            } else {
-                failure = serializeError(err);
-                failurePhase = failurePhase || (setupCompleted ? 'run' : 'setup');
-            }
-        }
-    } finally {
-        try {
-            if (definition.teardown && (!definition.setup || setupCompleted)) {
-                emit({
-                    type: 'phase-started',
-                    phase: 'teardown',
-                    testId: collectedTest.id,
-                    file: collectedTest.file,
-                    suitePath: collectedTest.suitePath,
-                    testName: collectedTest.name,
-                });
-
-                await runWithTimeout(
-                    () => Promise.resolve(
-                        definition.setup
-                            ? definition.teardown!(setupResult as never, context)
-                            : (definition.teardown as any)(context),
-                    ),
-                    {
-                        phase: 'teardown',
-                        timeoutMs: collectedTest.timeout,
-                    },
-                    () => {
-                        teardownStatus = 'timed-out';
-                        emitTimeout('teardown');
-                    },
-                );
-                teardownStatus = 'completed';
-
-                emit({
-                    type: 'phase-finished',
-                    phase: 'teardown',
-                    testId: collectedTest.id,
-                    file: collectedTest.file,
-                    suitePath: collectedTest.suitePath,
-                    testName: collectedTest.name,
-                });
-            }
-        } catch (err) {
-            if (err instanceof PhaseTimeoutError) {
-                teardownStatus = 'timed-out';
-
-                if (!failure) {
-                    failure = serializeTimeoutFailure(err.timeout);
-                    failurePhase = 'teardown';
-                }
-            } else {
-                teardownStatus = 'failed';
-
+        currentExecution = {
+            test,
+            markUnexpectedFailure: (err: unknown) => {
                 if (!failure) {
                     failure = serializeError(err);
-                    failurePhase = 'teardown';
+                    failurePhase = 'worker';
+                }
+                retireReason = 'unexpected-error';
+                controller.abort();
+            },
+        };
+
+        const emitTimeout = (phase: TestPhase) => {
+            const timeoutInfo: TimeoutInfo = {
+                phase,
+                timeoutMs: test.timeout,
+            };
+
+            controller.abort();
+
+            if (!timeout) timeout = timeoutInfo;
+            retireReason = 'timeout';
+
+            emitEvent({
+                type: 'test-timeout',
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
+                timeout: timeoutInfo,
+            });
+
+            return timeoutInfo;
+        };
+
+        emitEvent({
+            type: 'test-started',
+            testId: test.id,
+            file: test.file,
+            suitePath: test.suitePath,
+            testName: test.name,
+            mode: test.mode,
+        });
+
+        try {
+            if (definition.setup) {
+                emitEvent({
+                    type: 'phase-started',
+                    phase: 'setup',
+                    testId: test.id,
+                    file: test.file,
+                    suitePath: test.suitePath,
+                    testName: test.name,
+                });
+
+                setupResult = await runWithTimeout(
+                    () => Promise.resolve(definition.setup!(context)),
+                    {
+                        phase: 'setup',
+                        timeoutMs: test.timeout,
+                    },
+                    () => {
+                        emitTimeout('setup');
+                    },
+                );
+                setupCompleted = true;
+
+                emitEvent({
+                    type: 'phase-finished',
+                    phase: 'setup',
+                    testId: test.id,
+                    file: test.file,
+                    suitePath: test.suitePath,
+                    testName: test.name,
+                });
+            }
+
+            emitEvent({
+                type: 'phase-started',
+                phase: 'run',
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
+            });
+
+            await runWithTimeout(
+                async () => {
+                    if (definition.setup) await (definition.run as any)(setupResult, context);
+                    else await (definition.run as any)(context);
+                },
+                {
+                    phase: 'run',
+                    timeoutMs: test.timeout,
+                },
+                () => {
+                    emitTimeout('run');
+                },
+            );
+
+            emitEvent({
+                type: 'phase-finished',
+                phase: 'run',
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
+            });
+        } catch (err) {
+            if (!failure) {
+                if (err instanceof PhaseTimeoutError) {
+                    failure = serializeTimeoutFailure(err.timeout);
+                    failurePhase = err.timeout.phase;
+                } else {
+                    failure = serializeError(err);
+                    failurePhase = failurePhase || (setupCompleted ? 'run' : 'setup');
                 }
             }
+        } finally {
+            try {
+                if (definition.teardown && (!definition.setup || setupCompleted)) {
+                    emitEvent({
+                        type: 'phase-started',
+                        phase: 'teardown',
+                        testId: test.id,
+                        file: test.file,
+                        suitePath: test.suitePath,
+                        testName: test.name,
+                    });
+
+                    await runWithTimeout(
+                        () => Promise.resolve(
+                            definition.setup
+                                ? definition.teardown!(setupResult as never, context)
+                                : (definition.teardown as any)(context),
+                        ),
+                        {
+                            phase: 'teardown',
+                            timeoutMs: test.timeout,
+                        },
+                        () => {
+                            teardownStatus = 'timed-out';
+                            emitTimeout('teardown');
+                        },
+                    );
+                    teardownStatus = 'completed';
+
+                    emitEvent({
+                        type: 'phase-finished',
+                        phase: 'teardown',
+                        testId: test.id,
+                        file: test.file,
+                        suitePath: test.suitePath,
+                        testName: test.name,
+                    });
+                }
+            } catch (err) {
+                retireReason = retireReason || 'teardown-failed';
+
+                if (err instanceof PhaseTimeoutError) {
+                    teardownStatus = 'timed-out';
+
+                    if (!failure) {
+                        failure = serializeTimeoutFailure(err.timeout);
+                        failurePhase = 'teardown';
+                    }
+                } else {
+                    teardownStatus = 'failed';
+
+                    if (!failure) {
+                        failure = serializeError(err);
+                        failurePhase = 'teardown';
+                    }
+                }
+            }
+
+            controller.abort();
+            currentExecution = null;
+
+            if (failurePhase === 'worker') {
+                retireReason = retireReason || 'unexpected-error';
+            }
+
+            const finishedEvent: TestFinishedEvent = {
+                type: 'test-finished',
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
+                status: failure ? 'failed' : 'passed',
+                durationMs: Date.now() - startedAt,
+                prepareDurationMs,
+                failure,
+                failurePhase,
+                timeout,
+                teardownStatus,
+            };
+
+            emitEvent(finishedEvent);
+
+            if (retireReason) {
+                emitRetire(retireReason, test, timeout);
+            }
+        }
+    } catch (err) {
+        const finishedEvent: TestFinishedEvent = {
+            type: 'test-finished',
+            testId: test.id,
+            file: test.file,
+            suitePath: test.suitePath,
+            testName: test.name,
+            status: 'failed',
+            durationMs: 0,
+            prepareDurationMs,
+            failure: serializeError(err),
+            failurePhase: 'worker',
+            teardownStatus: 'interrupted',
+        };
+
+        emit(finishedEvent);
+    } finally {
+        busy = false;
+
+        if (shuttingDown) {
+            process.exit(0);
+            return;
         }
 
-        controller.abort();
-        process.removeListener('unhandledRejection', handleUnexpectedFailure);
-        process.removeListener('uncaughtException', handleUnexpectedFailure);
-
-        emit({
-            type: 'test-finished',
-            testId: collectedTest.id,
-            file: collectedTest.file,
-            suitePath: collectedTest.suitePath,
-            testName: collectedTest.name,
-            status: failure ? 'failed' : 'passed',
-            durationMs: Date.now() - startedAt,
-            failure,
-            failurePhase,
-            timeout,
-            teardownStatus,
-        });
+        if (!retiring) {
+            emitLifecycle({
+                type: 'worker-idle',
+                workerId,
+            });
+        }
     }
 }
 
-main().catch((err) => {
-    const port = requireParentPort();
-    const collectedTest = workerData as CollectedTest;
+port.on('message', (message: WorkerCommand) => {
+    if (message.type === 'shutdown') {
+        shuttingDown = true;
+        if (!busy) process.exit(0);
+        return;
+    }
 
-    port.postMessage({
-        type: 'test-finished',
-        testId: collectedTest.id,
-        file: collectedTest.file,
-        suitePath: collectedTest.suitePath,
-        testName: collectedTest.name,
-        status: 'failed',
-        durationMs: 0,
-        failure: serializeError(err),
-        failurePhase: 'worker',
-        teardownStatus: 'interrupted',
-    });
+    if (retiring || busy) {
+        emitRetire('protocol-violation', message.test);
+        return;
+    }
+
+    void executeTest(message.test);
+});
+
+emitLifecycle({
+    type: 'worker-ready',
+    workerId,
 });

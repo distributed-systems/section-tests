@@ -2,6 +2,7 @@ export type TestMode = 'parallel' | 'serial';
 export type LogLevel = 'info' | 'warn' | 'error' | 'success' | 'notice';
 export type TestPhase = 'setup' | 'run' | 'teardown';
 export type TeardownStatus = 'not-needed' | 'not-run' | 'completed' | 'failed' | 'timed-out' | 'interrupted';
+export type WorkerRetireReason = 'timeout' | 'teardown-failed' | 'unexpected-error' | 'protocol-violation' | 'hygiene';
 export interface TestContext {
     file: string;
     testName: string;
@@ -107,6 +108,7 @@ export interface TestFinishedEvent extends TestEventBase {
     type: 'test-finished';
     status: 'passed' | 'failed';
     durationMs: number;
+    prepareDurationMs: number;
     failure?: SerializedError;
     failurePhase?: TestPhase | 'worker';
     timeout?: TimeoutInfo;
@@ -119,6 +121,7 @@ export interface TestExecutionRecord {
     events: TestEvent[];
     status?: 'passed' | 'failed';
     durationMs?: number;
+    prepareDurationMs?: number;
     failure?: SerializedError;
     failurePhase?: TestPhase | 'worker';
     timeout?: TimeoutInfo;
@@ -139,13 +142,32 @@ export interface TestRunSummary {
     pass: boolean;
     records: TestExecutionRecord[];
 }
-export interface WorkerRequest {
-    file: string;
-    entryPath: number[];
-    testId: string;
-    name: string;
-    suitePath: string[];
-    timeout: number;
-    mode: TestMode;
+export interface WorkerRunTestCommand {
+    type: 'run-test';
+    test: CollectedTest;
 }
+export interface WorkerShutdownCommand {
+    type: 'shutdown';
+}
+export type WorkerCommand = WorkerRunTestCommand | WorkerShutdownCommand;
+export interface WorkerBootstrapData {
+    workerId: string;
+}
+export interface WorkerLifecycleMessageBase {
+    workerId: string;
+}
+export interface WorkerReadyMessage extends WorkerLifecycleMessageBase {
+    type: 'worker-ready';
+}
+export interface WorkerIdleMessage extends WorkerLifecycleMessageBase {
+    type: 'worker-idle';
+}
+export interface WorkerRetireMessage extends WorkerLifecycleMessageBase {
+    type: 'worker-retire';
+    reason: WorkerRetireReason;
+    testId?: string;
+    timeout?: TimeoutInfo;
+}
+export type WorkerLifecycleMessage = WorkerReadyMessage | WorkerIdleMessage | WorkerRetireMessage;
+export type WorkerMessage = TestEvent | WorkerLifecycleMessage;
 //# sourceMappingURL=runtime-types.d.ts.map

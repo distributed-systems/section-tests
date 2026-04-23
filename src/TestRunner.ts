@@ -14,6 +14,10 @@ import {
     TestRunSummary,
     TimeoutInfo,
     TimeoutPolicy,
+    WorkerBootstrapData,
+    WorkerCommand,
+    WorkerMessage,
+    WorkerRetireMessage,
     WorkerTerminationInfo,
 } from './runtime-types.js';
 
@@ -28,9 +32,16 @@ interface TestRunnerOptions {
     timeoutGraceMs?: number;
 }
 
-interface TimedOutWorkerState {
+interface WorkerJobState {
     test: CollectedTest;
+    logicalResolved: boolean;
+    resolve: () => void;
+}
+
+interface TimedOutWorkerState {
+    id: string;
     worker: Worker;
+    currentJob?: WorkerJobState;
     timedOutAt: number;
     timeout: TimeoutInfo;
     exitPromise: Promise<void>;
@@ -39,6 +50,8 @@ interface TimedOutWorkerState {
     finishedEventSeen: boolean;
     teardownStarted: boolean;
     workerTermination?: WorkerTerminationInfo;
+    replacementSpawned: boolean;
+    state: 'starting' | 'idle' | 'busy' | 'retiring' | 'exited';
 }
 
 export default class TestRunner {
@@ -49,6 +62,10 @@ export default class TestRunner {
     reporters: Reporter[];
     timeoutPolicy: TimeoutPolicy;
     timedOutWorkers: Map<string, TimedOutWorkerState>;
+    idleWorkers: TimedOutWorkerState[];
+    idleWaiters: Array<(worker: TimedOutWorkerState) => void>;
+    workerSeq: number;
+    shuttingDown: boolean;
 
     constructor({
         patterns,
@@ -67,6 +84,10 @@ export default class TestRunner {
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,
         };
         this.timedOutWorkers = new Map();
+        this.idleWorkers = [];
+        this.idleWaiters = [];
+        this.workerSeq = 0;
+        this.shuttingDown = false;
     }
 
     async execute(): Promise<void> {
@@ -101,6 +122,7 @@ export default class TestRunner {
                     case 'test-finished':
                         record.status = event.status;
                         record.durationMs = event.durationMs;
+                        record.prepareDurationMs = event.prepareDurationMs;
                         record.failure = event.failure;
                         record.failurePhase = event.failurePhase;
                         record.timeout = event.timeout;
@@ -122,9 +144,11 @@ export default class TestRunner {
         );
         console.log('');
 
+        await this.initializePool(handleEvent);
         await this.executeQueue(parallelTests, this.jobs, handleEvent);
         await this.executeQueue(serialTests, 1, handleEvent);
         await this.drainTimedOutWorkers(handleEvent);
+        this.shuttingDown = true;
 
         const orderedRecords = plan.tests.map((test) => {
             const record = records.get(test.id);
@@ -136,6 +160,7 @@ export default class TestRunner {
                 events: [],
                 status: 'failed' as const,
                 durationMs: 0,
+                prepareDurationMs: 0,
                 failure: {
                     name: 'Error',
                     message: 'Missing test result.',
@@ -188,142 +213,32 @@ export default class TestRunner {
 
         const queue = [...tests];
         const active = new Set<Promise<void>>();
+        while (queue.length || active.size) {
+            while (queue.length && active.size < maxWorkers) {
+                const worker = await this.acquireIdleWorker();
+                const next = queue.shift();
+                if (!worker || !next) break;
 
-        const launchNext = async (): Promise<void> => {
-            const next = queue.shift();
-            if (!next) return;
+                const execution = this.dispatchTest(worker, next)
+                    .catch((err) => {
+                        handleEvent(this.buildWorkerFailureEvent(
+                            next,
+                            err,
+                            undefined,
+                            next.source.hasTeardown ? 'not-run' : 'not-needed',
+                        ));
+                    })
+                    .finally(() => {
+                        active.delete(execution);
+                    });
 
-            const execution = this.executeTest(next, handleEvent)
-                .catch((err) => {
-                    handleEvent(this.buildWorkerFailureEvent(
-                        next,
-                        err,
-                        undefined,
-                        next.source.hasTeardown ? 'not-run' : 'not-needed',
-                    ));
-                })
-                .finally(() => {
-                    active.delete(execution);
-                });
-
-            active.add(execution);
-
-            if (active.size >= maxWorkers) {
-                await Promise.race(active);
+                active.add(execution);
             }
 
-            await launchNext();
-        };
-
-        await launchNext();
-        await Promise.all(active);
-    }
-
-    executeTest(test: CollectedTest, handleEvent: (event: TestEvent) => void): Promise<void> {
-        return new Promise((resolve) => {
-            const worker = new Worker(new URL('./worker.js', import.meta.url), {
-                workerData: test,
-            });
-
-            let finished = false;
-            let logicalComplete = false;
-            let failureReported = false;
-            let resolveExit!: () => void;
-            const exitPromise = new Promise<void>((exitResolve) => {
-                resolveExit = exitResolve;
-            });
-
-            const state: TimedOutWorkerState = {
-                test,
-                worker,
-                timedOutAt: 0,
-                timeout: {
-                    phase: 'run',
-                    timeoutMs: test.timeout,
-                },
-                exitPromise,
-                resolveExit,
-                exited: false,
-                finishedEventSeen: false,
-                teardownStarted: false,
-            };
-
-            const resolveLogical = () => {
-                if (logicalComplete) return;
-                logicalComplete = true;
-                resolve();
-            };
-
-            worker.on('message', (event: TestEvent) => {
-                if (event.type === 'phase-started' && event.phase === 'teardown') {
-                    state.teardownStarted = true;
-                }
-
-                if (event.type === 'test-timeout') {
-                    state.timedOutAt = state.timedOutAt || Date.now();
-                    state.timeout = event.timeout;
-                    this.timedOutWorkers.set(test.id, state);
-                    handleEvent(event);
-                    resolveLogical();
-                    return;
-                }
-
-                handleEvent(event);
-
-                if (event.type === 'test-finished') {
-                    finished = true;
-                    state.finishedEventSeen = true;
-
-                    if (event.timeout) {
-                        state.timedOutAt = state.timedOutAt || Date.now();
-                        state.timeout = event.timeout;
-                        this.timedOutWorkers.set(test.id, state);
-                    }
-
-                    resolveLogical();
-                }
-
-                if (event.type === 'worker-terminated') {
-                    state.workerTermination = event.workerTermination;
-                }
-            });
-
-            worker.on('error', (err) => {
-                if (!finished && !failureReported) {
-                    failureReported = true;
-                    handleEvent(this.buildWorkerFailureEvent(
-                        test,
-                        err,
-                        undefined,
-                        test.source.hasTeardown ? 'not-run' : 'not-needed',
-                    ));
-                    resolveLogical();
-                }
-            });
-
-            worker.on('exit', (code) => {
-                state.exited = true;
-                state.resolveExit();
-                this.timedOutWorkers.delete(test.id);
-
-                if (state.timedOutAt && !state.finishedEventSeen && !failureReported) {
-                    failureReported = true;
-                    handleEvent(this.buildTimedOutFailureEvent(state));
-                }
-
-                if (!finished && code !== 0 && !failureReported) {
-                    failureReported = true;
-                    handleEvent(this.buildWorkerFailureEvent(
-                        test,
-                        new Error(`Worker exited with code ${code}.`),
-                        state.workerTermination,
-                        test.source.hasTeardown ? 'not-run' : 'not-needed',
-                    ));
-                }
-
-                resolveLogical();
-            });
-        });
+            if (active.size) {
+                await Promise.race(active);
+            }
+        }
     }
 
     async drainTimedOutWorkers(handleEvent: (event: TestEvent) => void): Promise<void> {
@@ -351,23 +266,27 @@ export default class TestRunner {
             };
             state.workerTermination = workerTermination;
 
+            const test = state.currentJob?.test;
+            if (!test) return;
+
             handleEvent({
                 type: 'worker-terminated',
-                testId: state.test.id,
-                file: state.test.file,
-                suitePath: state.test.suitePath,
-                testName: state.test.name,
+                testId: test.id,
+                file: test.file,
+                suitePath: test.suitePath,
+                testName: test.name,
                 workerTermination,
             });
 
             if (!state.finishedEventSeen) {
                 handleEvent(this.buildTimedOutFailureEvent(state, workerTermination));
                 state.finishedEventSeen = true;
+                state.currentJob = undefined;
             }
 
             await state.worker.terminate();
             await state.exitPromise.catch(() => undefined);
-            this.timedOutWorkers.delete(state.test.id);
+            this.timedOutWorkers.delete(state.id);
         }));
     }
 
@@ -375,14 +294,20 @@ export default class TestRunner {
         state: TimedOutWorkerState,
         workerTermination?: WorkerTerminationInfo,
     ): TestEvent {
+        const test = state.currentJob?.test;
+        if (!test) {
+            throw new Error(`Timed out worker ${state.id} is missing current test state.`);
+        }
+
         return {
             type: 'test-finished',
-            testId: state.test.id,
-            file: state.test.file,
-            suitePath: state.test.suitePath,
-            testName: state.test.name,
+            testId: test.id,
+            file: test.file,
+            suitePath: test.suitePath,
+            testName: test.name,
             status: 'failed',
             durationMs: 0,
+            prepareDurationMs: 0,
             failure: {
                 name: 'TimeoutError',
                 message: `The ${state.timeout.phase} phase timed out after ${state.timeout.timeoutMs} milliseconds.`,
@@ -395,7 +320,8 @@ export default class TestRunner {
     }
 
     getInterruptedTeardownStatus(state: TimedOutWorkerState): TeardownStatus {
-        if (!state.test.source.hasTeardown) return 'not-needed';
+        const test = state.currentJob?.test;
+        if (!test?.source.hasTeardown) return 'not-needed';
         if (state.timeout.phase === 'teardown') return 'timed-out';
         if (state.teardownStarted) return 'interrupted';
         return 'not-run';
@@ -416,6 +342,7 @@ export default class TestRunner {
             testName: test.name,
             status: 'failed',
             durationMs: 0,
+            prepareDurationMs: 0,
             failure,
             failurePhase: 'worker',
             teardownStatus,
@@ -436,6 +363,231 @@ export default class TestRunner {
             name: 'Error',
             message: String(err),
         };
+    }
+
+    async initializePool(handleEvent: (event: TestEvent) => void): Promise<void> {
+        await Promise.all(Array.from({ length: this.jobs }, () => this.spawnWorker(handleEvent)));
+    }
+
+    async spawnWorker(handleEvent: (event: TestEvent) => void): Promise<TimedOutWorkerState> {
+        const id = `worker-${++this.workerSeq}`;
+        let resolveExit!: () => void;
+        let resolveReady!: () => void;
+        const exitPromise = new Promise<void>((exitResolve) => {
+            resolveExit = exitResolve;
+        });
+        const readyPromise = new Promise<void>((readyResolve) => {
+            resolveReady = readyResolve;
+        });
+
+        const worker = new Worker(new URL('./worker.js', import.meta.url), {
+            workerData: {
+                workerId: id,
+            } satisfies WorkerBootstrapData,
+        });
+
+        const state: TimedOutWorkerState = {
+            id,
+            worker,
+            timedOutAt: 0,
+            timeout: {
+                phase: 'run',
+                timeoutMs: this.timeoutPolicy.defaultTimeoutMs,
+            },
+            exitPromise,
+            resolveExit,
+            exited: false,
+            finishedEventSeen: false,
+            teardownStarted: false,
+            replacementSpawned: false,
+            state: 'starting',
+        };
+
+        worker.on('message', (message: WorkerMessage) => {
+            if (message.type === 'worker-ready') {
+                state.state = 'idle';
+                this.releaseIdleWorker(state);
+                resolveReady();
+                return;
+            }
+
+            if (message.type === 'worker-idle') {
+                if (state.exited || state.state === 'retiring') return;
+                state.currentJob = undefined;
+                state.finishedEventSeen = false;
+                state.teardownStarted = false;
+                state.timedOutAt = 0;
+                state.workerTermination = undefined;
+                state.state = 'idle';
+                this.releaseIdleWorker(state);
+                return;
+            }
+
+            if (message.type === 'worker-retire') {
+                this.handleWorkerRetire(state, message, handleEvent);
+                return;
+            }
+
+            const event = message;
+            if (event.type === 'phase-started' && event.phase === 'teardown') {
+                state.teardownStarted = true;
+            }
+
+            if (event.type === 'test-timeout') {
+                state.timedOutAt = state.timedOutAt || Date.now();
+                state.timeout = event.timeout;
+                this.timedOutWorkers.set(state.id, state);
+                this.resolveJob(state);
+            }
+
+            if (event.type === 'test-finished') {
+                state.finishedEventSeen = true;
+                if (event.timeout) {
+                    state.timedOutAt = state.timedOutAt || Date.now();
+                    state.timeout = event.timeout;
+                    this.timedOutWorkers.set(state.id, state);
+                }
+                this.resolveJob(state);
+            }
+
+            if (event.type === 'worker-terminated') {
+                state.workerTermination = event.workerTermination;
+            }
+
+            handleEvent(event);
+        });
+
+        worker.on('error', (err) => {
+            const test = state.currentJob?.test;
+            if (test && !state.currentJob?.logicalResolved && !state.finishedEventSeen) {
+                handleEvent(this.buildWorkerFailureEvent(
+                    test,
+                    err,
+                    state.workerTermination,
+                    test.source.hasTeardown ? 'not-run' : 'not-needed',
+                ));
+            }
+            this.resolveJob(state);
+            state.finishedEventSeen = true;
+            this.replaceWorker(state, handleEvent);
+        });
+
+        worker.on('exit', (code) => {
+            const priorState = state.state;
+            state.exited = true;
+            state.state = 'exited';
+            state.resolveExit();
+            resolveReady();
+            this.removeIdleWorker(state);
+            this.timedOutWorkers.delete(state.id);
+
+            const test = state.currentJob?.test;
+            if (test && state.timedOutAt && !state.finishedEventSeen) {
+                handleEvent(this.buildTimedOutFailureEvent(state, state.workerTermination));
+                state.finishedEventSeen = true;
+            } else if (test && code !== 0 && !state.finishedEventSeen && !state.currentJob?.logicalResolved) {
+                handleEvent(this.buildWorkerFailureEvent(
+                    test,
+                    new Error(`Worker exited with code ${code}.`),
+                    state.workerTermination,
+                    test.source.hasTeardown ? 'not-run' : 'not-needed',
+                ));
+                state.finishedEventSeen = true;
+            }
+
+            this.resolveJob(state);
+
+            if (!this.shuttingDown && !state.replacementSpawned && priorState !== 'idle') {
+                void this.spawnWorker(handleEvent);
+                state.replacementSpawned = true;
+            }
+        });
+
+        await readyPromise;
+
+        return state;
+    }
+
+    handleWorkerRetire(
+        state: TimedOutWorkerState,
+        message: WorkerRetireMessage,
+        handleEvent: (event: TestEvent) => void,
+    ): void {
+        state.state = 'retiring';
+        this.removeIdleWorker(state);
+
+        if (!state.replacementSpawned && !this.shuttingDown) {
+            void this.spawnWorker(handleEvent);
+            state.replacementSpawned = true;
+        }
+
+        if (message.reason === 'timeout') {
+            state.timedOutAt = state.timedOutAt || Date.now();
+            if (message.timeout) state.timeout = message.timeout;
+            this.timedOutWorkers.set(state.id, state);
+            return;
+        }
+
+        void state.worker.terminate();
+    }
+
+    async acquireIdleWorker(): Promise<TimedOutWorkerState> {
+        const idle = this.idleWorkers.shift();
+        if (idle) return idle;
+
+        return await new Promise<TimedOutWorkerState>((resolve) => {
+            this.idleWaiters.push(resolve);
+        });
+    }
+
+    releaseIdleWorker(worker: TimedOutWorkerState): void {
+        const waiter = this.idleWaiters.shift();
+        if (waiter) {
+            waiter(worker);
+            return;
+        }
+
+        this.idleWorkers.push(worker);
+    }
+
+    removeIdleWorker(worker: TimedOutWorkerState): void {
+        this.idleWorkers = this.idleWorkers.filter((candidate) => candidate.id !== worker.id);
+    }
+
+    dispatchTest(worker: TimedOutWorkerState, test: CollectedTest): Promise<void> {
+        worker.state = 'busy';
+        worker.finishedEventSeen = false;
+        worker.teardownStarted = false;
+        worker.timeout = {
+            phase: 'run',
+            timeoutMs: test.timeout,
+        };
+
+        return new Promise<void>((resolve) => {
+            worker.currentJob = {
+                test,
+                logicalResolved: false,
+                resolve,
+            };
+
+            worker.worker.postMessage({
+                type: 'run-test',
+                test,
+            } satisfies WorkerCommand);
+        });
+    }
+
+    resolveJob(worker: TimedOutWorkerState): void {
+        const job = worker.currentJob;
+        if (!job || job.logicalResolved) return;
+        job.logicalResolved = true;
+        job.resolve();
+    }
+
+    replaceWorker(worker: TimedOutWorkerState, handleEvent: (event: TestEvent) => void): void {
+        if (worker.replacementSpawned || this.shuttingDown) return;
+        worker.replacementSpawned = true;
+        void this.spawnWorker(handleEvent);
     }
 }
 

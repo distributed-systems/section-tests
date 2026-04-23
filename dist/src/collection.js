@@ -79,6 +79,9 @@ export async function collectTestPlan(files, options) {
 }
 export async function resolveCollectedTest(test) {
     const entries = await collectEntriesFromFile(test.file);
+    return resolveCollectedTestFromEntries(entries, test);
+}
+export function resolveCollectedTestFromEntries(entries, test) {
     let current = entries;
     for (const index of test.entryPath) {
         if (!Array.isArray(current)) {

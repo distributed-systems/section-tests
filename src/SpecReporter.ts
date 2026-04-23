@@ -67,6 +67,7 @@ export default class SpecReporter implements Reporter {
             case 'test-finished':
                 record.status = event.status;
                 record.durationMs = event.durationMs;
+                record.prepareDurationMs = event.prepareDurationMs;
                 record.failure = event.failure;
                 record.failurePhase = event.failurePhase;
                 record.timeout = event.timeout;
@@ -152,12 +153,15 @@ export default class SpecReporter implements Reporter {
 
         const totalDurationMs = this.summary.durationMs;
         const finishedRecords = this.summary.records.filter((record) => typeof record.durationMs === 'number');
-        const totalTestTimeMs = finishedRecords.reduce((sum, record) => sum + (record.durationMs || 0), 0);
-        const averagePerTestMs = finishedRecords.length > 0 ? totalTestTimeMs / finishedRecords.length : 0;
-        const averageParallelism = totalDurationMs > 0 ? totalTestTimeMs / totalDurationMs : 0;
+        const totalBodyTimeMs = finishedRecords.reduce((sum, record) => sum + (record.durationMs || 0), 0);
+        const totalPrepareTimeMs = finishedRecords.reduce((sum, record) => sum + (record.prepareDurationMs || 0), 0);
+        const totalHarnessTimeMs = totalBodyTimeMs + totalPrepareTimeMs;
+        const averagePerTestMs = finishedRecords.length > 0 ? totalHarnessTimeMs / finishedRecords.length : 0;
+        const averageParallelism = totalDurationMs > 0 ? totalHarnessTimeMs / totalDurationMs : 0;
 
         return chalk.dim(
             `avg/test ${this.formatStatDuration(averagePerTestMs)}`
+            + ` | load ${this.formatStatDuration(totalPrepareTimeMs)}`
             + ` | total ${this.formatStatDuration(totalDurationMs)}`
             + ` | avg parallelism ${averageParallelism.toFixed(2)}x`,
         );

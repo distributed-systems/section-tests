@@ -114,6 +114,10 @@ export async function collectTestPlan(files: string[], options: CollectTestPlanO
 
 export async function resolveCollectedTest(test: CollectedTest): Promise<TestDefinition> {
     const entries = await collectEntriesFromFile(test.file);
+    return resolveCollectedTestFromEntries(entries, test);
+}
+
+export function resolveCollectedTestFromEntries(entries: TestEntry[], test: CollectedTest): TestDefinition {
     let current: TestEntry | undefined = entries;
 
     for (const index of test.entryPath) {

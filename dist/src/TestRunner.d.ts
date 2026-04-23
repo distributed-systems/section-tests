@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import { CollectedTest, Reporter, SerializedError, TeardownStatus, TestEvent, TestRunSummary, TimeoutInfo, TimeoutPolicy, WorkerTerminationInfo } from './runtime-types.js';
+import { CollectedTest, Reporter, SerializedError, TeardownStatus, TestEvent, TestRunSummary, TimeoutInfo, TimeoutPolicy, WorkerRetireMessage, WorkerTerminationInfo } from './runtime-types.js';
 export declare const SECTION_TESTS_JSON_SUMMARY_PREFIX = "SECTION_TESTS_SUMMARY:";
 interface TestRunnerOptions {
     patterns: string[];
@@ -9,9 +9,15 @@ interface TestRunnerOptions {
     defaultTimeoutMs?: number;
     timeoutGraceMs?: number;
 }
-interface TimedOutWorkerState {
+interface WorkerJobState {
     test: CollectedTest;
+    logicalResolved: boolean;
+    resolve: () => void;
+}
+interface TimedOutWorkerState {
+    id: string;
     worker: Worker;
+    currentJob?: WorkerJobState;
     timedOutAt: number;
     timeout: TimeoutInfo;
     exitPromise: Promise<void>;
@@ -20,6 +26,8 @@ interface TimedOutWorkerState {
     finishedEventSeen: boolean;
     teardownStarted: boolean;
     workerTermination?: WorkerTerminationInfo;
+    replacementSpawned: boolean;
+    state: 'starting' | 'idle' | 'busy' | 'retiring' | 'exited';
 }
 export default class TestRunner {
     patterns: string[];
@@ -29,17 +37,29 @@ export default class TestRunner {
     reporters: Reporter[];
     timeoutPolicy: TimeoutPolicy;
     timedOutWorkers: Map<string, TimedOutWorkerState>;
+    idleWorkers: TimedOutWorkerState[];
+    idleWaiters: Array<(worker: TimedOutWorkerState) => void>;
+    workerSeq: number;
+    shuttingDown: boolean;
     constructor({ patterns, jsonSummary, jobs, reporters, defaultTimeoutMs, timeoutGraceMs, }: TestRunnerOptions);
     execute(): Promise<void>;
     emitJsonSummary(summary: TestRunSummary): void;
     resolvePatterns(): Promise<void>;
     executeQueue(tests: CollectedTest[], maxWorkers: number, handleEvent: (event: TestEvent) => void): Promise<void>;
-    executeTest(test: CollectedTest, handleEvent: (event: TestEvent) => void): Promise<void>;
     drainTimedOutWorkers(handleEvent: (event: TestEvent) => void): Promise<void>;
     buildTimedOutFailureEvent(state: TimedOutWorkerState, workerTermination?: WorkerTerminationInfo): TestEvent;
     getInterruptedTeardownStatus(state: TimedOutWorkerState): TeardownStatus;
     buildWorkerFailureEvent(test: CollectedTest, err: unknown, workerTermination: WorkerTerminationInfo | undefined, teardownStatus: TeardownStatus): TestEvent;
     serializeError(err: unknown): SerializedError;
+    initializePool(handleEvent: (event: TestEvent) => void): Promise<void>;
+    spawnWorker(handleEvent: (event: TestEvent) => void): Promise<TimedOutWorkerState>;
+    handleWorkerRetire(state: TimedOutWorkerState, message: WorkerRetireMessage, handleEvent: (event: TestEvent) => void): void;
+    acquireIdleWorker(): Promise<TimedOutWorkerState>;
+    releaseIdleWorker(worker: TimedOutWorkerState): void;
+    removeIdleWorker(worker: TimedOutWorkerState): void;
+    dispatchTest(worker: TimedOutWorkerState, test: CollectedTest): Promise<void>;
+    resolveJob(worker: TimedOutWorkerState): void;
+    replaceWorker(worker: TimedOutWorkerState, handleEvent: (event: TestEvent) => void): void;
 }
 export {};
 //# sourceMappingURL=TestRunner.d.ts.map

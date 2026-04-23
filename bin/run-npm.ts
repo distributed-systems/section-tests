@@ -13,10 +13,13 @@ process.on('unhandledRejection', (err: any, p) => {
 
 process.on('uncaughtException', console.trace);
 
-let patterns = process.argv.slice(2).filter(s => s && s[0] !== '-');
+const argv = process.argv.slice(2);
+const jsonSummary = argv.includes('--json-summary') || process.env.SECTION_TESTS_JSON_SUMMARY === '1';
+let patterns = argv.filter(s => s && s[0] !== '-');
 
 // executes as binary, run tests
 new TestRunner({
     patterns,
+    jsonSummary,
 }).execute();
 

@@ -4,16 +4,21 @@ import { exec } from 'child_process';
 import TestSuiteEndMessage from './message/TestSuiteEndMessage.js';
 import SpecReporter from './SpecReporter.js';
 
+export const SECTION_TESTS_JSON_SUMMARY_PREFIX = 'SECTION_TESTS_SUMMARY:';
+
 interface TestRunnerOptions {
     patterns: string[];
+    jsonSummary?: boolean;
 }
 
 export default class TestRunner {
     patterns: string[];
     files?: string[];
+    jsonSummary: boolean;
 
-    constructor({patterns}: TestRunnerOptions) {
+    constructor({patterns, jsonSummary = false}: TestRunnerOptions) {
         this.patterns = patterns;
+        this.jsonSummary = jsonSummary;
     }
 
     /**
@@ -42,10 +47,26 @@ export default class TestRunner {
         // tell that we're finished
         const transports = section.getTransports();
         transports.forEach((transport) => transport.send(message));
+        if (this.jsonSummary) {
+            this.emitJsonSummary(message);
+        }
 
         // ensure we exit after suite completion to avoid hanging processes
         const exitCode = failed > 0 ? 1 : 0;
         setTimeout(() => process.exit(exitCode), 150);
+    }
+
+    emitJsonSummary(message: TestSuiteEndMessage): void {
+        process.stderr.write(
+            `${SECTION_TESTS_JSON_SUMMARY_PREFIX}${JSON.stringify({
+                type: 'section-tests.suite-end',
+                ok: message.ok,
+                failed: message.failed,
+                total: message.ok + message.failed,
+                durationMs: message.duration || 0,
+                pass: message.failed === 0,
+            })}\n`,
+        );
     }
 
     /**

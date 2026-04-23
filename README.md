@@ -23,6 +23,11 @@ A beautiful, extensible and lightweight async test framework.
 You may use [glob](https://www.npmjs.com/package/glob) patterns for defining the files 
 that should be loaded for executing the tests.
 
+If you need a machine-readable suite-end summary while keeping the normal console output,
+run the binary with `--json-summary` or set `SECTION_TESTS_JSON_SUMMARY=1`.
+That emits one extra line on stderr with the prefix `SECTION_TESTS_SUMMARY:` followed by
+JSON containing `ok`, `failed`, `total`, `durationMs`, and `pass`.
+
 
 **3. Create your test files**
 

@@ -1,16 +1,21 @@
+import TestSuiteEndMessage from './message/TestSuiteEndMessage.js';
+export declare const SECTION_TESTS_JSON_SUMMARY_PREFIX = "SECTION_TESTS_SUMMARY:";
 interface TestRunnerOptions {
     patterns: string[];
+    jsonSummary?: boolean;
 }
 export default class TestRunner {
     patterns: string[];
     files?: string[];
-    constructor({ patterns }: TestRunnerOptions);
+    jsonSummary: boolean;
+    constructor({ patterns, jsonSummary }: TestRunnerOptions);
     /**
      * runs the test suite
      *
      * @return     {Promise}
      */
     execute(): Promise<void>;
+    emitJsonSummary(message: TestSuiteEndMessage): void;
     /**
      * resolve the user provided patterns using the glob library
      *

@@ -18,11 +18,33 @@ Add a script:
 }
 ```
 
-The CLI supports:
-- `--jobs=<n>` to control worker parallelism
-- `--timeout=<ms>` to change the runner default timeout for tests that do not specify one
-- `--timeout-grace=<ms>` to control how long a timed-out worker may linger for cleanup before forced termination
-- `--json-summary` or `SECTION_TESTS_JSON_SUMMARY=1` for one machine-readable summary line on stderr
+## CLI
+
+The `section` command comes from the package `bin` field (same behavior as `node dist/bin/run-npm.js` in this repo, or `node dist/bin/run.js` after a build).
+
+Everything that is **not** a known flag and does not start with `-` is treated as a **test file pattern** (glob or path), in order, and passed to the runner.
+
+### Flags
+
+Each option accepts either `--name=value` or `--name value` (the value must be the next argv token for the spaced form).
+
+| Flag | Env | Meaning |
+|------|-----|---------|
+| `--jobs=<n>` | — | Maximum parallel workers. If omitted, the runner uses `availableParallelism()` (at least 1). |
+| `--timeout=<ms>` | — | Default timeout in milliseconds for tests that do not set their own `timeout`. If omitted, the runner default applies (currently 2000 ms). |
+| `--timeout-grace=<ms>` | — | After a phase timeout, how long the worker may keep running before the parent force-terminates it if cleanup is still stuck. If omitted, the runner uses twice the configured default test timeout (`--timeout` / `defaultTimeoutMs`, default 2000 ms). |
+| `--json-summary` | `SECTION_TESTS_JSON_SUMMARY=1` | Emit one machine-readable JSON line on **stderr** when the suite ends, prefixed with `SECTION_TESTS_SUMMARY:` (see `SECTION_TESTS_JSON_SUMMARY_PREFIX` in the API). |
+| `--test-logs` | `SECTION_TESTS_TEST_LOGS=1` | After the run, print buffered `context` / test-log output from tests (by default the interactive reporter hides these until the end; this flag turns them on). When enabled, workers also try to load the optional **`logd`** dependency and register a sink so logd output is turned into `test-log` lines (captured like context logs) instead of going straight to the console during the run. If `logd` is not installed, workers continue normally. |
+
+Boolean flags (`--json-summary`, `--test-logs`) are presence-only; there is no `--no-*` form in the CLI parser.
+
+Example:
+
+```bash
+section './test/**/*.test.mjs' --jobs=4 --timeout=5000 --test-logs
+```
+
+**Refreshing the bundled `logd`:** `package.json` lists `logd` as a plain semver (`5.2.0`). The resolved package is the tarball under `vendor/logd-5.2.0.tgz` (see `package-lock.json`). To upgrade: bump and build `logd`, run `npm pack --pack-destination ../section-tests/vendor` from the `logd` package, update the semver and filename in `package.json` if the version changed, run `npm install ./vendor/logd-<version>.tgz`, then set the dependency back to semver-only and run `npm ci` to refresh the lockfile.
 
 ## Basic Usage
 

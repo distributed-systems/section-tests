@@ -275,6 +275,7 @@ export default class TestRunner {
         const worker = new Worker(new URL('./worker.js', import.meta.url), {
             workerData: {
                 workerId: id,
+                captureLogd: this.showTestLogs,
             },
         });
         const state = {

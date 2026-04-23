@@ -32,6 +32,7 @@
     "@distributed-systems/glob": "^3.0.0",
     "@distributed-systems/types": "^3.0.0",
     "log-update": "8.0.0",
+    "logd": "5.3.0",
     "slice-ansi": "^9.0.0",
     "string-width": "^8.1.0",
     "strip-ansi": "^7.1.0"
@@ -48,6 +49,7 @@
   },
   "files": [
     "dist",
+    "vendor",
     "README.md",
     "MIGRATION_FOR_AGENTS.md",
     "LICENSE"

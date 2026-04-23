@@ -126,12 +126,14 @@ interface ExecutionState {
 }
 
 const port = requireParentPort();
-const { workerId } = workerData as WorkerBootstrapData;
+const { workerId, captureLogd = false } = workerData as WorkerBootstrapData;
 const fileCache = new Map<string, FileCacheEntry>();
 let busy = false;
 let retiring = false;
 let shuttingDown = false;
 let currentExecution: ExecutionState | null = null;
+/** Current test while `executeTest` runs; used to attribute optional `logd` sink lines to `test-log`. */
+let activeTestForSink: CollectedTest | null = null;
 
 function emit(message: WorkerMessage): void {
     port.postMessage(message);
@@ -188,8 +190,74 @@ function handleUnexpectedFailure(err: unknown): void {
 process.on('unhandledRejection', handleUnexpectedFailure);
 process.on('uncaughtException', handleUnexpectedFailure);
 
+function mapLogdLevelToTest(level: string): LogLevel {
+    switch (level) {
+        case 'warn':
+            return 'warn';
+        case 'error':
+        case 'fatal':
+        case 'wtf':
+            return 'error';
+        case 'success':
+            return 'success';
+        case 'notice':
+        case 'highlight':
+            return 'notice';
+        default:
+            return 'info';
+    }
+}
+
+function formatLogdMessage(msg: { getValues(): unknown[]; getModuleName(): string }): string {
+    const parts = msg.getValues().map((v) => {
+        if (typeof v === 'string') return v;
+        if (v instanceof Error) return v.stack ?? v.message;
+        try {
+            return JSON.stringify(v);
+        } catch {
+            return String(v);
+        }
+    });
+    return parts.join(' ');
+}
+
+async function bootstrapWorker(): Promise<void> {
+    if (captureLogd) {
+        try {
+            const logdMod = await import('logd');
+            const logdInst = logdMod.default as {
+                enableLogs: () => void;
+                registerLogSink: (sink: (m: { getValues(): unknown[]; getModuleName(): string; getLogLevel(): { level: string } }) => void, mode: 'mirror' | 'replace') => void;
+            };
+            logdInst.enableLogs();
+            logdInst.registerLogSink((msg) => {
+                const t = activeTestForSink;
+                if (!t) return;
+                emit({
+                    type: 'test-log',
+                    workerId,
+                    testId: t.id,
+                    file: t.file,
+                    suitePath: t.suitePath,
+                    testName: t.name,
+                    level: mapLogdLevelToTest(msg.getLogLevel().level),
+                    message: `[logd/${msg.getModuleName()}] ${formatLogdMessage(msg)}`,
+                });
+            }, 'replace');
+        } catch {
+            // `logd` is optional; missing or broken install must not fail the worker.
+        }
+    }
+
+    emitLifecycle({
+        type: 'worker-ready',
+        workerId,
+    });
+}
+
 async function executeTest(test: CollectedTest): Promise<void> {
     busy = true;
+    activeTestForSink = test;
 
     let prepareDurationMs = 0;
 
@@ -498,6 +566,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
         emit(finishedEvent);
     } finally {
+        activeTestForSink = null;
         busy = false;
 
         if (shuttingDown) {
@@ -529,7 +598,4 @@ port.on('message', (message: WorkerCommand) => {
     void executeTest(message.test);
 });
 
-emitLifecycle({
-    type: 'worker-ready',
-    workerId,
-});
+void bootstrapWorker();

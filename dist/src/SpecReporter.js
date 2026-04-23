@@ -1,41 +1,29 @@
-import { basename } from 'node:path';
 import { createLogUpdate } from 'log-update';
 import chalk from './lib/chalk.js';
 export default class SpecReporter {
-    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, compactThreshold = 80, maxRunningTests = 6, createRenderer = (stream) => createLogUpdate(stream), } = {}) {
+    constructor({ interactive, output = process.stdout, renderIntervalMs = 50, workerSlots = 0, createRenderer = (stream) => createLogUpdate(stream), } = {}) {
         this.records = new Map();
-        this.suiteProgress = new Map();
-        this.suiteOrder = [];
-        this.startedOrder = [];
-        this.runningOrder = [];
-        this.mode = 'detailed';
+        this.slotStates = new Map();
+        this.workerIdToSlot = new Map();
         this.renderTimer = null;
         this.output = output;
         this.interactive = interactive ?? Boolean(output.isTTY);
         this.renderer = this.interactive ? createRenderer(this.output) : null;
         this.renderIntervalMs = renderIntervalMs;
-        this.compactThreshold = compactThreshold;
-        this.maxRunningTests = maxRunningTests;
+        this.configuredWorkerSlots = workerSlots;
+    }
+    setWorkerSlots(workerSlots) {
+        this.configuredWorkerSlots = Math.max(0, workerSlots);
     }
     onPlan(plan) {
         this.plan = plan;
         this.summary = undefined;
-        this.mode = plan.tests.length > this.compactThreshold ? 'compact' : 'detailed';
-        this.startedOrder = [];
-        this.runningOrder = [];
-        this.suiteOrder = [];
         this.records.clear();
-        this.suiteProgress.clear();
-        const duplicateSuiteLabels = this.getDuplicateSuiteLabels(plan.tests);
+        this.slotStates.clear();
+        this.workerIdToSlot.clear();
         plan.tests.forEach((test) => {
-            const suiteInfo = this.getSuiteInfo(test, duplicateSuiteLabels);
-            const suite = this.getOrCreateSuiteProgress(suiteInfo.key, suiteInfo.label);
-            suite.total += 1;
             this.records.set(test.id, {
                 test,
-                suiteKey: suiteInfo.key,
-                suiteLabel: suiteInfo.label,
-                started: false,
                 teardownStatus: test.source.hasTeardown ? 'not-run' : 'not-needed',
             });
         });
@@ -44,18 +32,26 @@ export default class SpecReporter {
         const record = this.records.get(event.testId);
         if (!record)
             return;
-        const suite = this.suiteProgress.get(record.suiteKey);
+        record.workerId = event.workerId;
+        const slot = this.resolveSlot(event.workerId, event.workerSlot);
+        if (slot !== undefined) {
+            record.workerSlot = slot;
+        }
+        const slotState = slot !== undefined ? this.ensureSlot(slot) : undefined;
         switch (event.type) {
             case 'test-started':
-                if (!record.started) {
-                    record.started = true;
-                    this.startedOrder.push(record.test.id);
-                    this.runningOrder.push(record.test.id);
-                    suite.running += 1;
+                if (slotState) {
+                    slotState.workerId = event.workerId;
+                    slotState.state = 'busy';
+                    slotState.currentRecord = record;
                 }
                 break;
             case 'phase-started':
                 record.currentPhase = event.phase;
+                if (slotState) {
+                    slotState.state = 'busy';
+                    slotState.currentRecord = record;
+                }
                 break;
             case 'phase-finished':
                 if (record.currentPhase === event.phase) {
@@ -67,6 +63,12 @@ export default class SpecReporter {
                 break;
             case 'worker-terminated':
                 record.workerTermination = event.workerTermination;
+                if (slotState) {
+                    slotState.workerId = event.workerId;
+                    slotState.state = 'replacing';
+                    slotState.currentRecord = undefined;
+                    slotState.lastRecord = record;
+                }
                 if (!this.interactive) {
                     this.displayWorkerTerminationEvent(record);
                 }
@@ -81,17 +83,12 @@ export default class SpecReporter {
                 record.teardownStatus = event.teardownStatus;
                 record.workerTermination = event.workerTermination ?? record.workerTermination;
                 record.currentPhase = undefined;
-                if (suite && record.started) {
-                    suite.running = Math.max(0, suite.running - 1);
-                    suite.completed += 1;
-                    if (event.status === 'passed')
-                        suite.passed += 1;
-                    else
-                        suite.failed += 1;
-                    if (event.timeout)
-                        suite.timedOut += 1;
+                if (slotState) {
+                    slotState.workerId = event.workerId;
+                    slotState.currentRecord = undefined;
+                    slotState.lastRecord = record;
+                    slotState.state = event.workerTermination || event.timeout ? 'replacing' : 'idle';
                 }
-                this.runningOrder = this.runningOrder.filter((testId) => testId !== record.test.id);
                 break;
         }
         if (this.interactive) {
@@ -116,18 +113,21 @@ export default class SpecReporter {
             liveRecord.teardownStatus = finalRecord.teardownStatus;
             liveRecord.workerTermination = finalRecord.workerTermination;
             liveRecord.currentPhase = undefined;
+            const slot = liveRecord.workerSlot;
+            if (!slot)
+                return;
+            const slotState = this.ensureSlot(slot);
+            slotState.lastRecord = liveRecord;
+            if (slotState.state !== 'busy') {
+                slotState.currentRecord = undefined;
+            }
         });
     }
     flush() {
         if (this.interactive) {
             this.clearPendingRender();
-            if (this.mode === 'compact') {
-                this.renderer?.clear();
-            }
-            else {
-                this.renderInteractiveBoard();
-                this.renderer?.done();
-            }
+            this.renderInteractiveBoard();
+            this.renderer?.done();
         }
         if (!this.summary)
             return;
@@ -173,52 +173,14 @@ export default class SpecReporter {
             return;
         if (!this.renderer)
             return;
-        const lines = this.mode === 'compact'
-            ? this.renderCompactLines()
-            : this.renderDetailedLines();
+        const lines = this.renderSlotLines();
         if (!lines.length)
             return;
         this.renderer(lines.join('\n'));
     }
-    renderDetailedLines() {
-        return this.startedOrder
-            .map((testId) => this.records.get(testId))
-            .filter((record) => Boolean(record))
-            .map((record) => this.formatRecordLine(record));
-    }
-    renderCompactLines() {
-        const total = this.plan?.tests.length || 0;
-        const suiteValues = this.suiteOrder
-            .map((key) => this.suiteProgress.get(key))
-            .filter((suite) => Boolean(suite));
-        const completed = suiteValues.reduce((sum, suite) => sum + suite.completed, 0);
-        const running = suiteValues.reduce((sum, suite) => sum + suite.running, 0);
-        const failed = suiteValues.reduce((sum, suite) => sum + suite.failed, 0);
-        const timedOut = suiteValues.reduce((sum, suite) => sum + suite.timedOut, 0);
-        const lines = [
-            chalk.dim(`progress ${completed}/${total} finished`
-                + ` | running ${running}`
-                + ` | failed ${failed}`
-                + (timedOut ? ` | timed out ${timedOut}` : '')),
-            ...suiteValues.map((suite) => this.formatSuiteLine(suite)),
-        ];
-        const runningRecords = this.runningOrder
-            .map((testId) => this.records.get(testId))
-            .filter((record) => Boolean(record))
-            .slice(0, this.maxRunningTests);
-        if (runningRecords.length) {
-            lines.push('');
-            lines.push(chalk.dim('running now'));
-            runningRecords.forEach((record) => {
-                const suffix = record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : '';
-                lines.push(`… ${chalk.white(`${record.suiteLabel} > ${record.test.name}`)}${suffix}`);
-            });
-            const remaining = this.runningOrder.length - runningRecords.length;
-            if (remaining > 0) {
-                lines.push(chalk.dim(`… and ${remaining} more running`));
-            }
-        }
-        return lines;
+    renderSlotLines() {
+        const slots = Array.from(this.slotStates.values()).sort((left, right) => left.slot - right.slot);
+        return slots.map((slotState) => this.formatSlotLine(slotState));
     }
     displayFinishedRecord(record) {
         console.log(this.formatRecordLine(record));
@@ -263,16 +225,30 @@ export default class SpecReporter {
             return;
         console.log(chalk.dim(`worker terminated after ${record.workerTermination.graceMs} ms grace`));
     }
+    formatSlotLine(slotState) {
+        const prefix = chalk.dim(`${slotState.slot.toString().padStart(2, '0')}`);
+        if (slotState.state === 'busy' && slotState.currentRecord) {
+            return `${prefix} ${chalk.dim('…')} ${chalk.white(this.describeTest(slotState.currentRecord))}${slotState.currentRecord.currentPhase ? chalk.dim(` [${slotState.currentRecord.currentPhase}]`) : ''}`;
+        }
+        if (slotState.lastRecord) {
+            const lastLine = this.formatRecordLine(slotState.lastRecord);
+            if (slotState.state === 'replacing') {
+                return `${prefix} ${lastLine} ${chalk.dim('[replacing worker]')}`;
+            }
+            return `${prefix} ${lastLine}`;
+        }
+        if (slotState.state === 'replacing') {
+            return `${prefix} ${chalk.dim('↻ replacing worker')}`;
+        }
+        return `${prefix} ${chalk.dim('· idle')}`;
+    }
     formatRecordLine(record) {
-        const suiteLabel = record.test.suitePath.length ? `${record.test.suitePath.join(' > ')} > ` : '';
         const duration = this.formatDuration(record.durationMs || 0);
         if (!record.status) {
-            const status = chalk.dim('…');
-            const suffix = record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : '';
-            return `${status} ${chalk.white(`${suiteLabel}${record.test.name}`)}${suffix}`;
+            return `${chalk.dim('…')} ${chalk.white(this.describeTest(record))}${record.currentPhase ? chalk.dim(` [${record.currentPhase}]`) : ''}`;
         }
         if (record.status === 'passed') {
-            return `${chalk.green('✔')} ${chalk.white(`${suiteLabel}${record.test.name}`)}${duration}`;
+            return `${chalk.green('✔')} ${chalk.white(this.describeTest(record))}${duration}`;
         }
         const parts = [];
         if (record.timeout) {
@@ -290,68 +266,40 @@ export default class SpecReporter {
         if (!parts.length && record.failure?.message) {
             parts.push(record.failure.message);
         }
-        return `${chalk.red('✖')} ${chalk.yellow(`${suiteLabel}${record.test.name}`)}${duration}${parts.length ? chalk.dim(` [${parts.join(', ')}]`) : ''}`;
+        return `${chalk.red('✖')} ${chalk.yellow(this.describeTest(record))}${duration}${parts.length ? chalk.dim(` [${parts.join(', ')}]`) : ''}`;
     }
-    formatSuiteLine(suite) {
-        const icon = suite.failed > 0 ? chalk.red('✖') : suite.running > 0 ? chalk.dim('…') : chalk.green('✔');
-        const parts = [
-            `${suite.completed}/${suite.total}`,
-            `${suite.running} running`,
-            `${suite.passed} passed`,
-        ];
-        if (suite.failed)
-            parts.push(`${suite.failed} failed`);
-        if (suite.timedOut)
-            parts.push(`${suite.timedOut} timed out`);
-        return `${icon} ${chalk.white(suite.label)} ${chalk.dim(parts.join(' | '))}`;
+    describeTest(record) {
+        const suiteLabel = record.test.suitePath.length ? `${record.test.suitePath.join(' > ')} > ` : '';
+        return `${suiteLabel}${record.test.name}`;
     }
-    getSuiteInfo(test, duplicateSuiteLabels) {
-        if (test.suitePath.length) {
-            const topLevelSuite = test.suitePath[0];
-            const label = duplicateSuiteLabels.has(topLevelSuite)
-                ? `${topLevelSuite} (${basename(test.file)})`
-                : topLevelSuite;
-            return {
-                key: `suite:${test.file}:${topLevelSuite}`,
-                label,
-            };
+    resolveSlot(workerId, workerSlot) {
+        if (workerSlot !== undefined) {
+            this.workerIdToSlot.set(workerId, workerSlot);
+            return workerSlot;
         }
-        return {
-            key: `file:${test.file}`,
-            label: basename(test.file),
-        };
+        const existing = this.workerIdToSlot.get(workerId);
+        if (existing !== undefined)
+            return existing;
+        if (this.configuredWorkerSlots > 0) {
+            for (let slot = 1; slot <= this.configuredWorkerSlots; slot++) {
+                if (!Array.from(this.workerIdToSlot.values()).includes(slot)) {
+                    this.workerIdToSlot.set(workerId, slot);
+                    return slot;
+                }
+            }
+        }
+        return undefined;
     }
-    getOrCreateSuiteProgress(key, label) {
-        const existing = this.suiteProgress.get(key);
+    ensureSlot(slot) {
+        const existing = this.slotStates.get(slot);
         if (existing)
             return existing;
-        const suite = {
-            key,
-            label,
-            total: 0,
-            running: 0,
-            completed: 0,
-            passed: 0,
-            failed: 0,
-            timedOut: 0,
+        const state = {
+            slot,
+            state: 'idle',
         };
-        this.suiteProgress.set(key, suite);
-        this.suiteOrder.push(key);
-        return suite;
-    }
-    getDuplicateSuiteLabels(tests) {
-        const filesByLabel = new Map();
-        tests.forEach((test) => {
-            if (!test.suitePath.length)
-                return;
-            const label = test.suitePath[0];
-            const files = filesByLabel.get(label) || new Set();
-            files.add(test.file);
-            filesByLabel.set(label, files);
-        });
-        return new Set(Array.from(filesByLabel.entries())
-            .filter(([, files]) => files.size > 1)
-            .map(([label]) => label));
+        this.slotStates.set(slot, state);
+        return state;
     }
     formatDuration(durationMs) {
         if (!durationMs || durationMs < 200)

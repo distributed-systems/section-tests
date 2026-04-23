@@ -10,7 +10,7 @@ export default class TestRunner {
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
         this.jobs = Math.max(1, jobs);
-        this.reporters = reporters.length ? reporters : [new SpecReporter()];
+        this.reporters = reporters.length ? reporters : [new SpecReporter({ workerSlots: this.jobs })];
         this.timeoutPolicy = {
             defaultTimeoutMs,
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,
@@ -26,6 +26,14 @@ export default class TestRunner {
         await this.resolvePatterns();
         const plan = await collectTestPlan(this.files || [], {
             defaultTimeoutMs: this.timeoutPolicy.defaultTimeoutMs,
+        });
+        const parallelTests = plan.tests.filter((test) => test.mode !== 'serial');
+        const serialTests = plan.tests.filter((test) => test.mode === 'serial');
+        const workerSlots = Math.max(1, Math.min(this.jobs, parallelTests.length || 1));
+        this.reporters.forEach((reporter) => {
+            if (reporter instanceof SpecReporter) {
+                reporter.setWorkerSlots(workerSlots);
+            }
         });
         this.reporters.forEach((reporter) => reporter.onPlan?.(plan));
         const records = new Map(plan.tests.map((test) => [test.id, {
@@ -58,13 +66,11 @@ export default class TestRunner {
             }
             this.reporters.forEach((reporter) => reporter.onEvent(event));
         };
-        const parallelTests = plan.tests.filter((test) => test.mode !== 'serial');
-        const serialTests = plan.tests.filter((test) => test.mode === 'serial');
-        console.log(`Running ${plan.tests.length} tests with up to ${this.jobs} in parallel`
+        console.log(`Running ${plan.tests.length} tests with up to ${workerSlots} in parallel`
             + (serialTests.length ? ` (${serialTests.length} serial)` : ''));
         console.log('');
-        await this.initializePool(handleEvent);
-        await this.executeQueue(parallelTests, this.jobs, handleEvent);
+        await this.initializePool(handleEvent, workerSlots);
+        await this.executeQueue(parallelTests, workerSlots, handleEvent);
         await this.executeQueue(serialTests, 1, handleEvent);
         await this.drainTimedOutWorkers(handleEvent);
         this.shuttingDown = true;
@@ -126,7 +132,7 @@ export default class TestRunner {
                     break;
                 const execution = this.dispatchTest(worker, next)
                     .catch((err) => {
-                    handleEvent(this.buildWorkerFailureEvent(next, err, undefined, next.source.hasTeardown ? 'not-run' : 'not-needed'));
+                    handleEvent(this.buildWorkerFailureEvent(next, worker.id, worker.slot, err, undefined, next.source.hasTeardown ? 'not-run' : 'not-needed'));
                 })
                     .finally(() => {
                     active.delete(execution);
@@ -164,6 +170,8 @@ export default class TestRunner {
                 return;
             handleEvent({
                 type: 'worker-terminated',
+                workerId: state.id,
+                workerSlot: state.slot,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -187,6 +195,8 @@ export default class TestRunner {
         }
         return {
             type: 'test-finished',
+            workerId: state.id,
+            workerSlot: state.slot,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,
@@ -214,10 +224,12 @@ export default class TestRunner {
             return 'interrupted';
         return 'not-run';
     }
-    buildWorkerFailureEvent(test, err, workerTermination, teardownStatus) {
+    buildWorkerFailureEvent(test, workerId, workerSlot, err, workerTermination, teardownStatus) {
         const failure = this.serializeError(err);
         return {
             type: 'test-finished',
+            workerId,
+            workerSlot,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,
@@ -244,10 +256,10 @@ export default class TestRunner {
             message: String(err),
         };
     }
-    async initializePool(handleEvent) {
-        await Promise.all(Array.from({ length: this.jobs }, () => this.spawnWorker(handleEvent)));
+    async initializePool(handleEvent, workerSlots) {
+        await Promise.all(Array.from({ length: workerSlots }, (_, index) => this.spawnWorker(handleEvent, index + 1)));
     }
-    async spawnWorker(handleEvent) {
+    async spawnWorker(handleEvent, slot) {
         const id = `worker-${++this.workerSeq}`;
         let resolveExit;
         let resolveReady;
@@ -264,6 +276,7 @@ export default class TestRunner {
         });
         const state = {
             id,
+            slot,
             worker,
             timedOutAt: 0,
             timeout: {
@@ -302,6 +315,7 @@ export default class TestRunner {
                 return;
             }
             const event = message;
+            event.workerSlot = state.slot;
             if (event.type === 'phase-started' && event.phase === 'teardown') {
                 state.teardownStarted = true;
             }
@@ -328,7 +342,7 @@ export default class TestRunner {
         worker.on('error', (err) => {
             const test = state.currentJob?.test;
             if (test && !state.currentJob?.logicalResolved && !state.finishedEventSeen) {
-                handleEvent(this.buildWorkerFailureEvent(test, err, state.workerTermination, test.source.hasTeardown ? 'not-run' : 'not-needed'));
+                handleEvent(this.buildWorkerFailureEvent(test, state.id, state.slot, err, state.workerTermination, test.source.hasTeardown ? 'not-run' : 'not-needed'));
             }
             this.resolveJob(state);
             state.finishedEventSeen = true;
@@ -348,12 +362,12 @@ export default class TestRunner {
                 state.finishedEventSeen = true;
             }
             else if (test && code !== 0 && !state.finishedEventSeen && !state.currentJob?.logicalResolved) {
-                handleEvent(this.buildWorkerFailureEvent(test, new Error(`Worker exited with code ${code}.`), state.workerTermination, test.source.hasTeardown ? 'not-run' : 'not-needed'));
+                handleEvent(this.buildWorkerFailureEvent(test, state.id, state.slot, new Error(`Worker exited with code ${code}.`), state.workerTermination, test.source.hasTeardown ? 'not-run' : 'not-needed'));
                 state.finishedEventSeen = true;
             }
             this.resolveJob(state);
             if (!this.shuttingDown && !state.replacementSpawned && priorState !== 'idle') {
-                void this.spawnWorker(handleEvent);
+                void this.spawnWorker(handleEvent, state.slot);
                 state.replacementSpawned = true;
             }
         });
@@ -364,7 +378,7 @@ export default class TestRunner {
         state.state = 'retiring';
         this.removeIdleWorker(state);
         if (!state.replacementSpawned && !this.shuttingDown) {
-            void this.spawnWorker(handleEvent);
+            void this.spawnWorker(handleEvent, state.slot);
             state.replacementSpawned = true;
         }
         if (message.reason === 'timeout') {
@@ -426,7 +440,7 @@ export default class TestRunner {
         if (worker.replacementSpawned || this.shuttingDown)
             return;
         worker.replacementSpawned = true;
-        void this.spawnWorker(handleEvent);
+        void this.spawnWorker(handleEvent, worker.slot);
     }
 }
 //# sourceMappingURL=TestRunner.js.map

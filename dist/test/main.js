@@ -53,15 +53,17 @@ function createPlan(tests) {
         tests,
     };
 }
-function eventBase(test) {
+function eventBase(test, workerId = 'worker-1', workerSlot = 1) {
     return {
+        workerId,
+        workerSlot,
         testId: test.id,
         file: test.file,
         suitePath: test.suitePath,
         testName: test.name,
     };
 }
-function createReporterHarness({ compactThreshold = 80, renderIntervalMs = 5, maxRunningTests = 6, } = {}) {
+function createReporterHarness({ renderIntervalMs = 5, workerSlots = 2, } = {}) {
     const frames = [];
     let doneCalls = 0;
     let clearCalls = 0;
@@ -76,9 +78,8 @@ function createReporterHarness({ compactThreshold = 80, renderIntervalMs = 5, ma
     };
     const reporter = new SpecReporter({
         interactive: true,
-        compactThreshold,
         renderIntervalMs,
-        maxRunningTests,
+        workerSlots,
         output: { isTTY: true },
         createRenderer: () => renderer,
     });
@@ -431,77 +432,153 @@ export default [
         assert.equal(lines.length, 2);
         assert.equal(lines[0].workerMarker, lines[1].workerMarker);
     },
-})), suite('Reporter', test('keeps detailed live mode for small suites', {
+})), suite('Reporter', test('shows no worker lines before any slot has received work', {
     async run() {
         const tests = [
-            createCollectedTest('small-1', 'first detail', ['SmallSuite'], '/tmp/small-suite.test.mjs', 0),
-            createCollectedTest('small-2', 'second detail', ['SmallSuite'], '/tmp/small-suite.test.mjs', 1),
+            createCollectedTest('slot-1', 'first slot test', ['SlotSuite'], '/tmp/slot-suite.test.mjs', 0),
+            createCollectedTest('slot-2', 'second slot test', ['SlotSuite'], '/tmp/slot-suite.test.mjs', 1),
         ];
         const { reporter, getLastFrame } = createReporterHarness({
-            compactThreshold: 10,
             renderIntervalMs: 1,
+            workerSlots: 2,
+        });
+        reporter.onPlan(createPlan(tests));
+        await sleep(10);
+        assert.equal(getLastFrame(), '');
+    },
+}), test('shows current work on the matching worker line', {
+    async run() {
+        const tests = [
+            createCollectedTest('busy-1', 'first worker test', ['BusySuite'], '/tmp/busy-suite.test.mjs', 0),
+            createCollectedTest('busy-2', 'second worker test', ['BusySuite'], '/tmp/busy-suite.test.mjs', 1),
+        ];
+        const { reporter, getLastFrame } = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 2,
         });
         reporter.onPlan(createPlan(tests));
         reporter.onEvent({
             type: 'test-started',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
             mode: 'parallel',
         });
         reporter.onEvent({
             type: 'phase-started',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
+            phase: 'run',
+        });
+        reporter.onEvent({
+            type: 'test-started',
+            ...eventBase(tests[1], 'worker-2', 2),
+            mode: 'parallel',
+        });
+        reporter.onEvent({
+            type: 'phase-started',
+            ...eventBase(tests[1], 'worker-2', 2),
             phase: 'run',
         });
         await sleep(10);
-        const frame = getLastFrame();
-        assert.match(frame, /SmallSuite > first detail \[run\]/);
-        assert.doesNotMatch(frame, /progress \d+\/\d+ finished/i);
+        const lines = getLastFrame().split('\n');
+        assert.equal(lines.length, 2);
+        assert.match(lines[0], /^01 … BusySuite > first worker test \[run\]$/);
+        assert.match(lines[1], /^02 … BusySuite > second worker test \[run\]$/);
     },
-}), test('switches to compact suite summaries for larger suites', {
+}), test('keeps the last completed result visible while a worker is idle', {
     async run() {
         const tests = [
-            createCollectedTest('compact-1', 'completed case', ['FastifyServer'], '/tmp/fastify.test.mjs', 0),
-            createCollectedTest('compact-2', 'fastify waiting', ['FastifyServer'], '/tmp/fastify.test.mjs', 1),
-            createCollectedTest('compact-3', 'running case', ['JWT'], '/tmp/jwt.test.mjs', 0),
-            createCollectedTest('compact-4', 'jwt waiting', ['JWT'], '/tmp/jwt.test.mjs', 1),
+            createCollectedTest('idle-1', 'finished on worker one', ['IdleSuite'], '/tmp/idle-suite.test.mjs', 0),
+            createCollectedTest('idle-2', 'still running on worker two', ['IdleSuite'], '/tmp/idle-suite.test.mjs', 1),
         ];
         const { reporter, getLastFrame } = createReporterHarness({
-            compactThreshold: 2,
             renderIntervalMs: 1,
-            maxRunningTests: 2,
+            workerSlots: 2,
         });
         reporter.onPlan(createPlan(tests));
         reporter.onEvent({
             type: 'test-started',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
             mode: 'parallel',
         });
         reporter.onEvent({
             type: 'test-finished',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
             status: 'passed',
-            durationMs: 45,
+            durationMs: 42,
             prepareDurationMs: 5,
             teardownStatus: 'not-needed',
         });
         reporter.onEvent({
             type: 'test-started',
-            ...eventBase(tests[2]),
+            ...eventBase(tests[1], 'worker-2', 2),
             mode: 'parallel',
         });
         reporter.onEvent({
             type: 'phase-started',
-            ...eventBase(tests[2]),
+            ...eventBase(tests[1], 'worker-2', 2),
             phase: 'run',
         });
         await sleep(10);
-        const frame = getLastFrame();
-        assert.match(frame, /progress 1\/4 finished \| running 1 \| failed 0/i);
-        assert.match(frame, /FastifyServer 1\/2 \| 0 running \| 1 passed/i);
-        assert.match(frame, /JWT 0\/2 \| 1 running \| 0 passed/i);
-        assert.match(frame, /running now/i);
-        assert.match(frame, /JWT > running case \[run\]/i);
-        assert.doesNotMatch(frame, /completed case/i);
+        const lines = getLastFrame().split('\n');
+        assert.equal(lines.length, 2);
+        assert.match(lines[0], /^01 ✔ IdleSuite > finished on worker one$/);
+        assert.match(lines[1], /^02 … IdleSuite > still running on worker two \[run\]$/);
+    },
+}), test('reuses the same slot line for replacement workers', {
+    async run() {
+        const tests = [
+            createCollectedTest('replace-1', 'times out on first worker', ['ReplaceSuite'], '/tmp/replace-suite.test.mjs', 0),
+            createCollectedTest('replace-2', 'runs on replacement worker', ['ReplaceSuite'], '/tmp/replace-suite.test.mjs', 1),
+        ];
+        const { reporter, getLastFrame } = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 2,
+        });
+        reporter.onPlan(createPlan(tests));
+        reporter.onEvent({
+            type: 'test-started',
+            ...eventBase(tests[0], 'worker-1', 1),
+            mode: 'parallel',
+        });
+        reporter.onEvent({
+            type: 'test-finished',
+            ...eventBase(tests[0], 'worker-1', 1),
+            status: 'failed',
+            durationMs: 0,
+            prepareDurationMs: 0,
+            failure: {
+                name: 'TimeoutError',
+                message: 'timed out',
+            },
+            failurePhase: 'run',
+            timeout: {
+                phase: 'run',
+                timeoutMs: 100,
+            },
+            teardownStatus: 'not-needed',
+            workerTermination: {
+                forced: true,
+                reason: 'timeout-grace-expired',
+                graceMs: 200,
+            },
+        });
+        await sleep(10);
+        let lines = getLastFrame().split('\n');
+        assert.equal(lines.length, 1);
+        assert.match(lines[0], /^01 ✖ ReplaceSuite > times out on first worker \[timeout run 100 ms, killed after 200 ms grace\] \[replacing worker\]$/);
+        reporter.onEvent({
+            type: 'test-started',
+            ...eventBase(tests[1], 'worker-9', 1),
+            mode: 'parallel',
+        });
+        reporter.onEvent({
+            type: 'phase-started',
+            ...eventBase(tests[1], 'worker-9', 1),
+            phase: 'run',
+        });
+        await sleep(10);
+        lines = getLastFrame().split('\n');
+        assert.equal(lines.length, 1);
+        assert.match(lines[0], /^01 … ReplaceSuite > runs on replacement worker \[run\]$/);
     },
 }), test('throttles redraw bursts in interactive mode', {
     async run() {
@@ -509,184 +586,84 @@ export default [
             createCollectedTest('throttle-1', 'first throttle', ['ThrottleSuite'], '/tmp/throttle.test.mjs', 0),
             createCollectedTest('throttle-2', 'second throttle', ['ThrottleSuite'], '/tmp/throttle.test.mjs', 1),
         ];
-        const { reporter, frames, getDoneCalls } = createReporterHarness({
-            compactThreshold: 10,
+        const { reporter, frames, getClearCalls, getDoneCalls } = createReporterHarness({
             renderIntervalMs: 20,
+            workerSlots: 2,
         });
         reporter.onPlan(createPlan(tests));
         reporter.onEvent({
             type: 'test-started',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
             mode: 'parallel',
         });
         reporter.onEvent({
             type: 'phase-started',
-            ...eventBase(tests[0]),
-            phase: 'setup',
-        });
-        reporter.onEvent({
-            type: 'phase-finished',
-            ...eventBase(tests[0]),
-            phase: 'setup',
-        });
-        reporter.onEvent({
-            type: 'phase-started',
-            ...eventBase(tests[0]),
+            ...eventBase(tests[0], 'worker-1', 1),
             phase: 'run',
         });
         reporter.onEvent({
             type: 'test-started',
-            ...eventBase(tests[1]),
+            ...eventBase(tests[1], 'worker-2', 2),
             mode: 'parallel',
         });
         reporter.onEvent({
             type: 'phase-started',
-            ...eventBase(tests[1]),
+            ...eventBase(tests[1], 'worker-2', 2),
+            phase: 'run',
+        });
+        reporter.onEvent({
+            type: 'phase-finished',
+            ...eventBase(tests[1], 'worker-2', 2),
             phase: 'run',
         });
         await sleep(35);
-        assert.equal(frames.length, 1, `expected a single coalesced render, got ${frames.length}`);
+        assert.equal(frames.length, 1, `expected one coalesced update, got ${frames.length}`);
         reporter.flush();
+        assert.equal(getClearCalls(), 0);
         assert.equal(getDoneCalls(), 1);
-        assert.equal(frames.length, 2, `expected final flush render, got ${frames.length}`);
+        assert.equal(frames.length, 2, `expected final persistent render after flush, got ${frames.length}`);
     },
-}), test('preserves final summary and failure details in both live modes', {
+}), test('preserves final summary and leaves the live board visible on flush', {
     async run() {
-        const detailedTest = createCollectedTest('summary-detailed', 'broken detail', ['DetailSuite'], '/tmp/detail.test.mjs', 0);
-        const compactTests = [
-            createCollectedTest('summary-compact-1', 'broken compact', ['CompactSuite'], '/tmp/compact.test.mjs', 0),
-            createCollectedTest('summary-compact-2', 'other compact', ['CompactSuite'], '/tmp/compact.test.mjs', 1),
-        ];
-        const detailedReporter = createReporterHarness({
-            compactThreshold: 10,
-        }).reporter;
-        detailedReporter.onPlan(createPlan([detailedTest]));
-        detailedReporter.onSummary({
+        const testCase = createCollectedTest('summary-slot', 'broken slot', ['SummarySuite'], '/tmp/summary-suite.test.mjs', 0);
+        const harness = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 1,
+        });
+        harness.reporter.onPlan(createPlan([testCase]));
+        harness.reporter.onEvent({
+            type: 'test-started',
+            ...eventBase(testCase, 'worker-1', 1),
+            mode: 'parallel',
+        });
+        harness.reporter.onSummary({
             ok: 0,
             failed: 1,
             total: 1,
             durationMs: 125,
             pass: false,
             records: [{
-                    test: detailedTest,
+                    test: testCase,
                     events: [],
                     status: 'failed',
                     durationMs: 10,
                     prepareDurationMs: 5,
                     failure: {
                         name: 'Error',
-                        message: 'detailed boom',
-                        stack: 'Error: detailed boom\n    at detail.test.mjs:1:1',
+                        message: 'slot boom',
+                        stack: 'Error: slot boom\n    at summary.test.mjs:1:1',
                     },
                     failurePhase: 'run',
                     teardownStatus: 'not-needed',
                 }],
         });
-        const detailedLogs = await captureConsoleLogs(() => {
-            detailedReporter.flush();
-        });
-        assert.match(detailedLogs.join('\n'), /1 \/ 1 tests failed!/i);
-        assert.match(detailedLogs.join('\n'), /run: broken detail - detailed boom/i);
-        const compactReporter = createReporterHarness({
-            compactThreshold: 1,
-        }).reporter;
-        compactReporter.onPlan(createPlan(compactTests));
-        compactReporter.onSummary({
-            ok: 1,
-            failed: 1,
-            total: 2,
-            durationMs: 240,
-            pass: false,
-            records: [
-                {
-                    test: compactTests[0],
-                    events: [],
-                    status: 'failed',
-                    durationMs: 30,
-                    prepareDurationMs: 6,
-                    failure: {
-                        name: 'Error',
-                        message: 'compact boom',
-                        stack: 'Error: compact boom\n    at compact.test.mjs:1:1',
-                    },
-                    failurePhase: 'run',
-                    teardownStatus: 'not-needed',
-                },
-                {
-                    test: compactTests[1],
-                    events: [],
-                    status: 'passed',
-                    durationMs: 20,
-                    prepareDurationMs: 4,
-                    teardownStatus: 'not-needed',
-                },
-            ],
-        });
-        const compactLogs = await captureConsoleLogs(() => {
-            compactReporter.flush();
-        });
-        assert.match(compactLogs.join('\n'), /1 \/ 2 tests failed!/i);
-        assert.match(compactLogs.join('\n'), /run: broken compact - compact boom/i);
-    },
-}), test('disambiguates duplicate compact suite labels and clears live board on flush', {
-    async run() {
-        const tests = [
-            createCollectedTest('dupe-1', 'first request context test', ['RequestContext'], '/tmp/request-context-one.test.mjs', 0),
-            createCollectedTest('dupe-2', 'second request context test', ['RequestContext'], '/tmp/request-context-two.test.mjs', 0),
-        ];
-        const harness = createReporterHarness({
-            compactThreshold: 1,
-            renderIntervalMs: 1,
-        });
-        harness.reporter.onPlan(createPlan(tests));
-        harness.reporter.onEvent({
-            type: 'test-started',
-            ...eventBase(tests[0]),
-            mode: 'parallel',
-        });
-        harness.reporter.onEvent({
-            type: 'test-finished',
-            ...eventBase(tests[0]),
-            status: 'passed',
-            durationMs: 10,
-            prepareDurationMs: 2,
-            teardownStatus: 'not-needed',
-        });
-        await sleep(10);
-        const frame = harness.getLastFrame();
-        assert.match(frame, /RequestContext \(request-context-one\.test\.mjs\)/i);
-        assert.match(frame, /RequestContext \(request-context-two\.test\.mjs\)/i);
-        harness.reporter.onSummary({
-            ok: 2,
-            failed: 0,
-            total: 2,
-            durationMs: 25,
-            pass: true,
-            records: [
-                {
-                    test: tests[0],
-                    events: [],
-                    status: 'passed',
-                    durationMs: 10,
-                    prepareDurationMs: 2,
-                    teardownStatus: 'not-needed',
-                },
-                {
-                    test: tests[1],
-                    events: [],
-                    status: 'passed',
-                    durationMs: 8,
-                    prepareDurationMs: 1,
-                    teardownStatus: 'not-needed',
-                },
-            ],
-        });
         const logs = await captureConsoleLogs(() => {
             harness.reporter.flush();
         });
-        assert.equal(harness.getClearCalls(), 1);
-        assert.equal(harness.getDoneCalls(), 0);
-        assert.match(logs.join('\n'), /2 tests executed successfully/i);
+        assert.equal(harness.getClearCalls(), 0);
+        assert.equal(harness.getDoneCalls(), 1);
+        assert.match(logs.join('\n'), /1 \/ 1 tests failed!/i);
+        assert.match(logs.join('\n'), /run: broken slot - slot boom/i);
     },
 })));
 //# sourceMappingURL=main.js.map

@@ -93,6 +93,8 @@ export interface WorkerTerminationInfo {
 }
 
 export interface TestEventBase {
+    workerId: string;
+    workerSlot?: number;
     testId: string;
     file: string;
     suitePath: string[];

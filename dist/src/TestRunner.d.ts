@@ -16,6 +16,7 @@ interface WorkerJobState {
 }
 interface TimedOutWorkerState {
     id: string;
+    slot: number;
     worker: Worker;
     currentJob?: WorkerJobState;
     timedOutAt: number;
@@ -49,10 +50,10 @@ export default class TestRunner {
     drainTimedOutWorkers(handleEvent: (event: TestEvent) => void): Promise<void>;
     buildTimedOutFailureEvent(state: TimedOutWorkerState, workerTermination?: WorkerTerminationInfo): TestEvent;
     getInterruptedTeardownStatus(state: TimedOutWorkerState): TeardownStatus;
-    buildWorkerFailureEvent(test: CollectedTest, err: unknown, workerTermination: WorkerTerminationInfo | undefined, teardownStatus: TeardownStatus): TestEvent;
+    buildWorkerFailureEvent(test: CollectedTest, workerId: string, workerSlot: number, err: unknown, workerTermination: WorkerTerminationInfo | undefined, teardownStatus: TeardownStatus): TestEvent;
     serializeError(err: unknown): SerializedError;
-    initializePool(handleEvent: (event: TestEvent) => void): Promise<void>;
-    spawnWorker(handleEvent: (event: TestEvent) => void): Promise<TimedOutWorkerState>;
+    initializePool(handleEvent: (event: TestEvent) => void, workerSlots: number): Promise<void>;
+    spawnWorker(handleEvent: (event: TestEvent) => void, slot: number): Promise<TimedOutWorkerState>;
     handleWorkerRetire(state: TimedOutWorkerState, message: WorkerRetireMessage, handleEvent: (event: TestEvent) => void): void;
     acquireIdleWorker(): Promise<TimedOutWorkerState>;
     releaseIdleWorker(worker: TimedOutWorkerState): void;

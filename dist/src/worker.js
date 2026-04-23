@@ -134,6 +134,7 @@ async function executeTest(test) {
         function emitLog(level, message) {
             emitEvent({
                 type: 'test-log',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -172,6 +173,7 @@ async function executeTest(test) {
             retireReason = 'timeout';
             emitEvent({
                 type: 'test-timeout',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -182,6 +184,7 @@ async function executeTest(test) {
         };
         emitEvent({
             type: 'test-started',
+            workerId,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,
@@ -192,6 +195,7 @@ async function executeTest(test) {
             if (definition.setup) {
                 emitEvent({
                     type: 'phase-started',
+                    workerId,
                     phase: 'setup',
                     testId: test.id,
                     file: test.file,
@@ -207,6 +211,7 @@ async function executeTest(test) {
                 setupCompleted = true;
                 emitEvent({
                     type: 'phase-finished',
+                    workerId,
                     phase: 'setup',
                     testId: test.id,
                     file: test.file,
@@ -216,6 +221,7 @@ async function executeTest(test) {
             }
             emitEvent({
                 type: 'phase-started',
+                workerId,
                 phase: 'run',
                 testId: test.id,
                 file: test.file,
@@ -235,6 +241,7 @@ async function executeTest(test) {
             });
             emitEvent({
                 type: 'phase-finished',
+                workerId,
                 phase: 'run',
                 testId: test.id,
                 file: test.file,
@@ -259,6 +266,7 @@ async function executeTest(test) {
                 if (definition.teardown && (!definition.setup || setupCompleted)) {
                     emitEvent({
                         type: 'phase-started',
+                        workerId,
                         phase: 'teardown',
                         testId: test.id,
                         file: test.file,
@@ -277,6 +285,7 @@ async function executeTest(test) {
                     teardownStatus = 'completed';
                     emitEvent({
                         type: 'phase-finished',
+                        workerId,
                         phase: 'teardown',
                         testId: test.id,
                         file: test.file,
@@ -309,6 +318,7 @@ async function executeTest(test) {
             }
             const finishedEvent = {
                 type: 'test-finished',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -330,6 +340,7 @@ async function executeTest(test) {
     catch (err) {
         const finishedEvent = {
             type: 'test-finished',
+            workerId,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,

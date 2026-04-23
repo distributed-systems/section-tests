@@ -192,6 +192,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
         function emitLog(level: LogLevel, message: string): void {
             emitEvent({
                 type: 'test-log',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -235,6 +236,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
             emitEvent({
                 type: 'test-timeout',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -247,6 +249,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
         emitEvent({
             type: 'test-started',
+            workerId,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,
@@ -258,6 +261,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
             if (definition.setup) {
                 emitEvent({
                     type: 'phase-started',
+                    workerId,
                     phase: 'setup',
                     testId: test.id,
                     file: test.file,
@@ -279,6 +283,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
                 emitEvent({
                     type: 'phase-finished',
+                    workerId,
                     phase: 'setup',
                     testId: test.id,
                     file: test.file,
@@ -289,6 +294,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
             emitEvent({
                 type: 'phase-started',
+                workerId,
                 phase: 'run',
                 testId: test.id,
                 file: test.file,
@@ -312,6 +318,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
             emitEvent({
                 type: 'phase-finished',
+                workerId,
                 phase: 'run',
                 testId: test.id,
                 file: test.file,
@@ -333,6 +340,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
                 if (definition.teardown && (!definition.setup || setupCompleted)) {
                     emitEvent({
                         type: 'phase-started',
+                        workerId,
                         phase: 'teardown',
                         testId: test.id,
                         file: test.file,
@@ -359,6 +367,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
                     emitEvent({
                         type: 'phase-finished',
+                        workerId,
                         phase: 'teardown',
                         testId: test.id,
                         file: test.file,
@@ -395,6 +404,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
 
             const finishedEvent: TestFinishedEvent = {
                 type: 'test-finished',
+                workerId,
                 testId: test.id,
                 file: test.file,
                 suitePath: test.suitePath,
@@ -417,6 +427,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
     } catch (err) {
         const finishedEvent: TestFinishedEvent = {
             type: 'test-finished',
+            workerId,
             testId: test.id,
             file: test.file,
             suitePath: test.suitePath,

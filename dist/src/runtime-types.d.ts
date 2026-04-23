@@ -78,6 +78,8 @@ export interface WorkerTerminationInfo {
     graceMs: number;
 }
 export interface TestEventBase {
+    workerId: string;
+    workerSlot?: number;
     testId: string;
     file: string;
     suitePath: string[];

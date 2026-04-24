@@ -218,6 +218,29 @@ export default [ test('one', async () => {}) ];
             },
         }),
 
+        test('captures direct console/stdout writes as test-log output instead of leaking raw lines', {
+            timeout: 15_000,
+            async run() {
+                const rel = './test/fixtures/console-output-captured.mjs';
+                for (const argv of [
+                    [runnerPath, '--agent-output', '--jobs=1', rel],
+                    [runnerPath, '--test-logs', '--jobs=1', rel],
+                ] as const) {
+                    const result = spawnSync(process.execPath, [...argv], {
+                        cwd: rootDirectory,
+                        encoding: 'utf8',
+                        env: process.env,
+                    });
+                    const out = stripAnsi(result.stdout);
+                    assert.equal(result.status, 0, result.stderr || out);
+                    assert.match(out, /\[info\].*DIRECT_STDOUT_MARKER/i);
+                    assert.match(out, /\[error\].*DIRECT_STDERR_MARKER/i);
+                    assert.doesNotMatch(out, /(?:^|\n)DIRECT_STDOUT_MARKER(?:\n|$)/);
+                    assert.doesNotMatch(out, /(?:^|\n)DIRECT_STDERR_MARKER(?:\n|$)/);
+                }
+            },
+        }),
+
         test('does not leak unhandled rejection when run promise rejects after timeout quiesce', {
             timeout: 20_000,
             async run() {

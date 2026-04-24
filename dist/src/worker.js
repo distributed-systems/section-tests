@@ -83,7 +83,7 @@ function waitForRunToSettleOrStuck(runTask, quiesceMs) {
     });
 }
 const port = requireParentPort();
-const { workerId, captureLogd = false } = workerData;
+const { workerId, captureLogd = false, captureConsoleOutput = false } = workerData;
 const fileCache = new Map();
 let busy = false;
 let retiring = false;
@@ -91,6 +91,7 @@ let shuttingDown = false;
 let currentExecution = null;
 /** Current test while `executeTest` runs; used to attribute optional `logd` sink lines to `test-log`. */
 let activeTestForSink = null;
+let writingCapturedStream = false;
 function emit(message) {
     port.postMessage(message);
 }
@@ -170,7 +171,60 @@ function formatLogdMessage(msg) {
     });
     return parts.join(' ');
 }
+function formatWriteChunk(chunk, encoding) {
+    if (typeof chunk === 'string') {
+        return chunk;
+    }
+    if (chunk instanceof Uint8Array) {
+        return Buffer.from(chunk).toString(encoding ?? 'utf8');
+    }
+    return String(chunk);
+}
+function emitCapturedStreamLog(level, message) {
+    const t = activeTestForSink;
+    if (!t)
+        return;
+    const trimmed = message.replace(/\r\n/g, '\n').replace(/\n+$/g, '');
+    if (!trimmed.length)
+        return;
+    emit({
+        type: 'test-log',
+        workerId,
+        testId: t.id,
+        file: t.file,
+        suitePath: t.suitePath,
+        testName: t.name,
+        level,
+        message: trimmed,
+    });
+}
+function installConsoleCapture() {
+    const wrapStreamWrite = (stream, level) => {
+        const original = stream.write.bind(stream);
+        stream.write = ((chunk, encoding, cb) => {
+            const actualEncoding = typeof encoding === 'string' ? encoding : undefined;
+            const callback = typeof encoding === 'function' ? encoding : typeof cb === 'function' ? cb : undefined;
+            if (!writingCapturedStream && activeTestForSink) {
+                try {
+                    writingCapturedStream = true;
+                    emitCapturedStreamLog(level, formatWriteChunk(chunk, actualEncoding));
+                }
+                finally {
+                    writingCapturedStream = false;
+                }
+                callback?.();
+                return true;
+            }
+            return original(chunk, encoding, cb);
+        });
+    };
+    wrapStreamWrite(process.stdout, 'info');
+    wrapStreamWrite(process.stderr, 'error');
+}
 async function bootstrapWorker() {
+    if (captureConsoleOutput) {
+        installConsoleCapture();
+    }
     if (captureLogd) {
         try {
             const logdMod = await import('logd');

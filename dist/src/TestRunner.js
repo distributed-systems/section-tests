@@ -282,6 +282,9 @@ export default class TestRunner {
             workerData: {
                 workerId: id,
                 captureLogd: this.showTestLogs || this.agentOutput,
+                captureConsoleOutput: this.agentOutput
+                    || this.showTestLogs
+                    || (this.reporters.some((reporter) => reporter instanceof SpecReporter) && Boolean(process.stdout.isTTY)),
             },
         });
         const state = {

@@ -131,7 +131,7 @@ interface ExecutionState {
 }
 
 const port = requireParentPort();
-const { workerId, captureLogd = false } = workerData as WorkerBootstrapData;
+const { workerId, captureLogd = false, captureConsoleOutput = false } = workerData as WorkerBootstrapData;
 const fileCache = new Map<string, FileCacheEntry>();
 let busy = false;
 let retiring = false;
@@ -139,6 +139,7 @@ let shuttingDown = false;
 let currentExecution: ExecutionState | null = null;
 /** Current test while `executeTest` runs; used to attribute optional `logd` sink lines to `test-log`. */
 let activeTestForSink: CollectedTest | null = null;
+let writingCapturedStream = false;
 
 function emit(message: WorkerMessage): void {
     port.postMessage(message);
@@ -226,7 +227,64 @@ function formatLogdMessage(msg: { getValues(): unknown[]; getModuleName(): strin
     return parts.join(' ');
 }
 
+function formatWriteChunk(chunk: unknown, encoding?: BufferEncoding): string {
+    if (typeof chunk === 'string') {
+        return chunk;
+    }
+    if (chunk instanceof Uint8Array) {
+        return Buffer.from(chunk).toString(encoding ?? 'utf8');
+    }
+    return String(chunk);
+}
+
+function emitCapturedStreamLog(level: LogLevel, message: string): void {
+    const t = activeTestForSink;
+    if (!t) return;
+    const trimmed = message.replace(/\r\n/g, '\n').replace(/\n+$/g, '');
+    if (!trimmed.length) return;
+    emit({
+        type: 'test-log',
+        workerId,
+        testId: t.id,
+        file: t.file,
+        suitePath: t.suitePath,
+        testName: t.name,
+        level,
+        message: trimmed,
+    });
+}
+
+function installConsoleCapture(): void {
+    const wrapStreamWrite = (
+        stream: NodeJS.WriteStream,
+        level: LogLevel,
+    ): void => {
+        const original = stream.write.bind(stream) as NodeJS.WriteStream['write'];
+        stream.write = ((chunk: any, encoding?: any, cb?: any) => {
+            const actualEncoding = typeof encoding === 'string' ? encoding as BufferEncoding : undefined;
+            const callback = typeof encoding === 'function' ? encoding : typeof cb === 'function' ? cb : undefined;
+            if (!writingCapturedStream && activeTestForSink) {
+                try {
+                    writingCapturedStream = true;
+                    emitCapturedStreamLog(level, formatWriteChunk(chunk, actualEncoding));
+                } finally {
+                    writingCapturedStream = false;
+                }
+                callback?.();
+                return true;
+            }
+            return original(chunk, encoding as any, cb);
+        }) as NodeJS.WriteStream['write'];
+    };
+
+    wrapStreamWrite(process.stdout, 'info');
+    wrapStreamWrite(process.stderr, 'error');
+}
+
 async function bootstrapWorker(): Promise<void> {
+    if (captureConsoleOutput) {
+        installConsoleCapture();
+    }
     if (captureLogd) {
         try {
             const logdMod = await import('logd');

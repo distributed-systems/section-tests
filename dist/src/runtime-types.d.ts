@@ -158,6 +158,8 @@ export interface WorkerBootstrapData {
     workerId: string;
     /** When true, register a `logd` sink (if the package is installed) so log lines become `test-log` events. The runner enables this for `--test-logs` or `--agent-output`. */
     captureLogd?: boolean;
+    /** When true, capture worker `console.*` / stdout / stderr writes as `test-log` events instead of letting them corrupt live reporter output. */
+    captureConsoleOutput?: boolean;
 }
 export interface WorkerLifecycleMessageBase {
     workerId: string;

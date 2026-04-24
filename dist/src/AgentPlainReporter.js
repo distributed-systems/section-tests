@@ -1,3 +1,4 @@
+import chalk from './lib/chalk.js';
 function oneLine(text) {
     return text.replace(/\r\n/g, '\n').replace(/\n/g, ' \\n ');
 }
@@ -19,24 +20,56 @@ function sortTestsForPlan(tests) {
         return a.name.localeCompare(b.name);
     });
 }
+function paintLogLevel(level, text) {
+    switch (level) {
+        case 'error':
+            return chalk.red(text);
+        case 'warn':
+            return chalk.yellow(text);
+        case 'success':
+            return chalk.green(text);
+        case 'notice':
+            return chalk.cyan(text);
+        default:
+            return chalk.white(text);
+    }
+}
 /**
- * Linear, low-noise output for scripts and AI agents: one event per line, plan printed up front,
- * no TTY / log-update board. Does not replace {@link SpecReporter}; enable via `--agent-output` or
- * `SECTION_TESTS_AGENT_OUTPUT=1`.
+ * Human- and agent-friendly plain output: colorful plan up front, then per-test detail printed
+ * when each test finishes (phases and `test-log` grouped under that test). No box-drawing rules.
+ * Enable with `--agent-output` or `SECTION_TESTS_AGENT_OUTPUT=1`.
  */
 export default class AgentPlainReporter {
     constructor(_options) {
-        // Options reserved for API parity with `SpecReporter`; agent mode always prints `test-log` lines.
+        this.pending = new Map();
+        // Reserved for API parity with `SpecReporter`.
+    }
+    ensurePending(ev) {
+        let p = this.pending.get(ev.testId);
+        if (!p) {
+            p = {
+                file: ev.file,
+                suitePath: [...ev.suitePath],
+                testName: ev.testName,
+                entries: [],
+            };
+            this.pending.set(ev.testId, p);
+        }
+        return p;
+    }
+    push(ev, entry) {
+        this.ensurePending(ev).entries.push(entry);
     }
     onPlan(plan) {
         const lines = [];
         lines.push('');
-        lines.push('================================================================================');
-        lines.push('section-tests — agent output (plain chronological log)');
-        lines.push('================================================================================');
-        lines.push(`cwd: ${process.cwd()}`);
-        lines.push(`plan.files (${plan.files.length}): ${plan.files.join(', ')}`);
-        lines.push(`total.tests: ${plan.tests.length}`);
+        lines.push(chalk.bold.cyan('section-tests ')
+            + chalk.dim('— ')
+            + chalk.bold.white('agent output ')
+            + chalk.dim('(grouped by test when each completes)'));
+        lines.push(chalk.dim('cwd: ') + chalk.white(process.cwd()));
+        lines.push(chalk.dim('files: ') + chalk.white(String(plan.files.length)) + chalk.dim('  ') + plan.files.map((f) => chalk.grey(f)).join(chalk.dim(', ')));
+        lines.push(chalk.dim('total tests: ') + chalk.white(String(plan.tests.length)));
         lines.push('');
         const byFile = new Map();
         for (const t of sortTestsForPlan(plan.tests)) {
@@ -44,96 +77,173 @@ export default class AgentPlainReporter {
             list.push(t);
             byFile.set(t.file, list);
         }
-        lines.push('--------------------------------------------------------------------------------');
-        lines.push('PLAN (grouped by file, then suite path)');
-        lines.push('--------------------------------------------------------------------------------');
+        lines.push(chalk.bold.blue('PLAN ') + chalk.dim('by file, then suite'));
         for (const [file, tests] of [...byFile.entries()].sort(([a], [b]) => a.localeCompare(b))) {
             lines.push('');
-            lines.push(`file: ${file}`);
+            lines.push(chalk.yellow('▸ file ') + chalk.white(file));
             let lastSuite = '\0';
             for (const t of tests) {
                 const suiteKey = t.suitePath.join('\0');
                 if (suiteKey !== lastSuite) {
                     lastSuite = suiteKey;
-                    lines.push(`  suite: ${suiteHeading(t.suitePath)}`);
+                    lines.push(chalk.dim('  suite ') + chalk.cyan(suiteHeading(t.suitePath)));
                 }
-                const mode = t.mode === 'serial' ? 'serial' : 'parallel';
-                lines.push(`    • ${JSON.stringify(t.name)} id=${t.id} mode=${mode} timeout_ms=${t.timeout}`);
+                const mode = t.mode === 'serial' ? chalk.yellow('serial') : chalk.green('parallel');
+                lines.push(chalk.dim('    • ')
+                    + chalk.white(t.name)
+                    + chalk.dim('  id=')
+                    + chalk.grey(t.id)
+                    + chalk.dim('  ')
+                    + mode
+                    + chalk.dim(`  timeout=${t.timeout}ms`));
             }
         }
         lines.push('');
-        lines.push('--------------------------------------------------------------------------------');
-        lines.push('RUN (chronological; one line per event)');
-        lines.push('--------------------------------------------------------------------------------');
+        lines.push(chalk.bold.blue('RESULTS ') + chalk.dim('(each block appears when that test finishes)'));
         lines.push('');
         console.log(lines.join('\n'));
     }
     onEvent(event) {
-        const base = describeTest({
-            name: event.testName,
-            suitePath: event.suitePath,
-        });
-        const slot = event.workerSlot !== undefined ? String(event.workerSlot) : '-';
-        const head = `[section-tests:run] ${base}`;
+        const ev = event;
         switch (event.type) {
             case 'test-started':
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | START | mode=${event.mode}`);
+                this.push(ev, {
+                    kind: 'start',
+                    workerId: event.workerId,
+                    workerSlot: event.workerSlot,
+                    mode: event.mode,
+                });
                 break;
             case 'phase-started':
+                this.push(ev, { kind: 'phase', phase: event.phase, edge: 'started' });
+                break;
             case 'phase-finished':
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | ${event.type.toUpperCase()} | phase=${event.phase}`);
+                this.push(ev, { kind: 'phase', phase: event.phase, edge: 'finished' });
                 break;
             case 'test-log':
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | LOG | level=${event.level} | ${oneLine(event.message)}`);
+                this.push(ev, { kind: 'log', level: event.level, message: event.message });
                 break;
             case 'test-timeout':
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | TIMEOUT | phase=${event.timeout.phase} timeout_ms=${event.timeout.timeoutMs}`);
+                this.push(ev, {
+                    kind: 'timeout',
+                    phase: event.timeout.phase,
+                    timeoutMs: event.timeout.timeoutMs,
+                });
                 break;
             case 'worker-terminated':
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | WORKER_TERMINATED | forced=${String(event.workerTermination.forced)} reason=${event.workerTermination.reason} grace_ms=${event.workerTermination.graceMs}`);
+                this.push(ev, {
+                    kind: 'worker-terminated',
+                    forced: event.workerTermination.forced,
+                    reason: event.workerTermination.reason,
+                    graceMs: event.workerTermination.graceMs,
+                });
                 break;
-            case 'test-finished': {
-                const parts = [
-                    `status=${event.status}`,
-                    `duration_ms=${event.durationMs}`,
-                    `prepare_ms=${event.prepareDurationMs}`,
-                    `teardown=${event.teardownStatus}`,
-                ];
-                if (event.failurePhase)
-                    parts.push(`failure_phase=${event.failurePhase}`);
-                if (event.timeout)
-                    parts.push(`timeout_phase=${event.timeout.phase}`);
-                if (event.failure) {
-                    parts.push(`error=${JSON.stringify(event.failure.name)}: ${oneLine(event.failure.message)}`);
-                    if (event.failure.stack)
-                        parts.push(`stack=${oneLine(event.failure.stack)}`);
-                }
-                if (event.workerTermination) {
-                    parts.push(`worker_termination=${event.workerTermination.reason} grace_ms=${event.workerTermination.graceMs}`);
-                }
-                console.log(`${head} | worker=${event.workerId} slot=${slot} | FINISH | ${parts.join(' | ')}`);
+            case 'test-finished':
+                this.printCompletedBlock(event);
+                this.pending.delete(event.testId);
                 break;
-            }
             default:
                 break;
         }
     }
-    onSummary(summary) {
+    printCompletedBlock(finished) {
+        const p = this.pending.get(finished.testId);
+        const entries = p?.entries ?? [];
+        const label = describeTest({
+            name: finished.testName,
+            suitePath: finished.suitePath,
+        });
+        const slot = finished.workerSlot !== undefined ? String(finished.workerSlot) : '—';
+        const passed = finished.status === 'passed';
+        const ind = chalk.dim('  ');
         const lines = [];
         lines.push('');
-        lines.push('================================================================================');
-        lines.push('SUMMARY');
-        lines.push('================================================================================');
-        lines.push(`passed: ${summary.ok}  failed: ${summary.failed}  total: ${summary.total}  duration_ms=${summary.durationMs}  pass=${summary.pass}`);
+        lines.push((passed ? chalk.green.bold('✔ ') : chalk.red.bold('✖ '))
+            + chalk.bold.white(label)
+            + chalk.dim(`  ${finished.workerId}  slot ${slot}`));
+        lines.push(ind + chalk.grey(finished.file));
+        for (const e of entries) {
+            switch (e.kind) {
+                case 'start':
+                    lines.push(ind
+                        + chalk.blue('start')
+                        + chalk.dim('  mode=')
+                        + chalk.white(e.mode)
+                        + (e.workerSlot !== undefined ? chalk.dim(`  slot=${e.workerSlot}`) : ''));
+                    break;
+                case 'phase': {
+                    const tag = e.edge === 'started' ? chalk.yellow('→') : chalk.green('←');
+                    const ph = chalk.cyan(e.phase);
+                    lines.push(ind + `  ${tag} ${ph} ${e.edge === 'started' ? chalk.dim('started') : chalk.dim('finished')}`);
+                    break;
+                }
+                case 'log': {
+                    const lvl = chalk.dim(`[${e.level}]`);
+                    const body = paintLogLevel(e.level, oneLine(e.message));
+                    lines.push(ind + `  ${lvl} ${body}`);
+                    break;
+                }
+                case 'timeout':
+                    lines.push(ind
+                        + chalk.red.bold('timeout')
+                        + chalk.dim(`  phase=${e.phase}  ${e.timeoutMs}ms`));
+                    break;
+                case 'worker-terminated':
+                    lines.push(ind
+                        + chalk.red.bold('worker')
+                        + chalk.dim(`  forced=${String(e.forced)}  ${e.reason}  grace=${e.graceMs}ms`));
+                    break;
+                default:
+                    break;
+            }
+        }
+        const dur = chalk.white(`${finished.durationMs}ms`) + chalk.dim(`  prepare ${finished.prepareDurationMs}ms  teardown ${finished.teardownStatus}`);
+        lines.push(ind + (passed ? chalk.green.bold('PASS ') : chalk.red.bold('FAIL ')) + dur);
+        if (finished.failure) {
+            lines.push(ind
+                + chalk.red(finished.failure.name)
+                + chalk.dim(': ')
+                + chalk.yellow(oneLine(finished.failure.message)));
+            if (finished.failure.stack) {
+                for (const row of finished.failure.stack.split('\n').slice(0, 12)) {
+                    lines.push(ind + chalk.grey(`  ${oneLine(row)}`));
+                }
+            }
+        }
+        console.log(lines.join('\n'));
+    }
+    onSummary(summary) {
+        if (this.pending.size > 0) {
+            console.log('');
+            console.log(chalk.yellow.bold('! Tests without a finish event (buffer dump):'));
+            for (const [id, p] of this.pending) {
+                console.log(chalk.dim(`  ${id}  ${describeTest({ name: p.testName, suitePath: p.suitePath })}`));
+                for (const e of p.entries) {
+                    console.log(chalk.grey(`    ${JSON.stringify(e)}`));
+                }
+            }
+            this.pending.clear();
+        }
+        const lines = [];
+        lines.push('');
+        lines.push(chalk.bold.white('SUMMARY'));
+        lines.push(chalk.green(`passed ${summary.ok}`)
+            + chalk.dim('  |  ')
+            + (summary.failed ? chalk.red(`failed ${summary.failed}`) : chalk.dim(`failed ${summary.failed}`))
+            + chalk.dim('  |  ')
+            + chalk.white(`total ${summary.total}`)
+            + chalk.dim('  |  ')
+            + chalk.cyan(`${summary.durationMs}ms`)
+            + chalk.dim('  |  ')
+            + (summary.pass ? chalk.green.bold('OK') : chalk.red.bold('NOT OK')));
         const failed = summary.records.filter((r) => r.status !== 'passed');
         if (failed.length) {
             lines.push('');
-            lines.push('--- failed tests ---');
+            lines.push(chalk.red.bold('Failed tests'));
             for (const r of failed) {
-                const label = describeTest(r.test);
-                lines.push(`  • ${label}`);
+                lines.push(chalk.dim('  • ') + chalk.yellow(describeTest(r.test)));
                 if (r.failure) {
-                    lines.push(`    ${r.failure.name}: ${oneLine(r.failure.message)}`);
+                    lines.push(chalk.red(`    ${r.failure.name}: `) + chalk.white(oneLine(r.failure.message)));
                 }
             }
         }
@@ -141,7 +251,7 @@ export default class AgentPlainReporter {
         console.log(lines.join('\n'));
     }
     flush() {
-        // No buffered TTY state; summary already printed end-state in onSummary.
+        // Buffered output is tied to test completion; nothing to flush here.
     }
 }
 //# sourceMappingURL=AgentPlainReporter.js.map

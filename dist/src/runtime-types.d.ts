@@ -156,7 +156,7 @@ export interface WorkerShutdownCommand {
 export type WorkerCommand = WorkerRunTestCommand | WorkerShutdownCommand;
 export interface WorkerBootstrapData {
     workerId: string;
-    /** When true, register a `logd` sink (if the package is installed) so log lines become `test-log` events. */
+    /** When true, register a `logd` sink (if the package is installed) so log lines become `test-log` events. The runner enables this for `--test-logs` or `--agent-output`. */
     captureLogd?: boolean;
 }
 export interface WorkerLifecycleMessageBase {

@@ -166,6 +166,7 @@ class SpecReporter {
             case 'test-log': {
                 if (this.interactive) {
                     this.bufferedTestLogs.push({
+                        testId: event.testId,
                         testLabel: this.describeTest(record),
                         level: event.level,
                         message: event.message,
@@ -388,12 +389,25 @@ class SpecReporter {
         }
         if (!this.bufferedTestLogs.length)
             return;
+        const failedIds = new Set((this.summary?.records ?? [])
+            .filter((r) => r.status !== 'passed')
+            .map((r) => r.test.id));
+        const remaining = this.bufferedTestLogs.filter((e) => !failedIds.has(e.testId));
+        this.bufferedTestLogs = [];
+        if (!remaining.length)
+            return;
         console.log(chalk.dim('Test log (from context)'));
-        for (const entry of this.bufferedTestLogs) {
+        for (const entry of remaining) {
             this.printTestLog(entry.testLabel, entry.level, entry.message);
         }
         console.log('');
-        this.bufferedTestLogs = [];
+    }
+    /**
+     * In non-interactive mode with `--test-logs`, logs are already printed as they arrive; repeating
+     * them here would duplicate. Interactive (buffered) or runs without live logs still benefit.
+     */
+    shouldPrintTestLogsUnderFailures() {
+        return this.interactive || !this.showTestLogs;
     }
     displayFailureDetails() {
         if (!this.summary)
@@ -401,7 +415,15 @@ class SpecReporter {
         const failedRecords = this.summary.records.filter((record) => record.status === 'failed' && record.failure);
         if (!failedRecords.length)
             return;
+        const labelFor = (test) => this.describeTest({ test });
         for (const record of failedRecords) {
+            if (this.shouldPrintTestLogsUnderFailures()) {
+                for (const ev of record.events) {
+                    if (ev.type !== 'test-log')
+                        continue;
+                    this.printTestLog(labelFor(record.test), ev.level, ev.message);
+                }
+            }
             console.log(`${chalk.red(record.failurePhase || 'run')}: ${chalk.white(record.test.name)} - ${chalk.white(record.failure.message)}`);
             if (record.failure?.stack) {
                 record.failure.stack

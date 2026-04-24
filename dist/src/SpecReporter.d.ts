@@ -55,6 +55,11 @@ export default class SpecReporter implements Reporter {
     private printTestLog;
     private formatTestLogLevel;
     private displayBufferedTestLogs;
+    /**
+     * In non-interactive mode with `--test-logs`, logs are already printed as they arrive; repeating
+     * them here would duplicate. Interactive (buffered) or runs without live logs still benefit.
+     */
+    private shouldPrintTestLogsUnderFailures;
     private displayFailureDetails;
     private displayEndSummary;
     /** Wall-clock duration in short form, e.g. 12.17s or 125 ms. */

@@ -233,6 +233,26 @@ async function bootstrapWorker(): Promise<void> {
             logdInst.registerLogSink((msg) => {
                 const t = activeTestForSink;
                 if (!t) return;
+                const levelRow = (() => {
+                    try {
+                        return msg.getLogLevel();
+                    } catch {
+                        return undefined;
+                    }
+                })();
+                const rawLevel = levelRow && typeof levelRow.level === 'string' ? levelRow.level : 'info';
+                let body: string;
+                try {
+                    body = formatLogdMessage(msg);
+                } catch {
+                    body = '(logd message formatting failed)';
+                }
+                let moduleName: string;
+                try {
+                    moduleName = msg.getModuleName();
+                } catch {
+                    moduleName = '?';
+                }
                 emit({
                     type: 'test-log',
                     workerId,
@@ -240,8 +260,8 @@ async function bootstrapWorker(): Promise<void> {
                     file: t.file,
                     suitePath: t.suitePath,
                     testName: t.name,
-                    level: mapLogdLevelToTest(msg.getLogLevel().level),
-                    message: `[logd/${msg.getModuleName()}] ${formatLogdMessage(msg)}`,
+                    level: mapLogdLevelToTest(rawLevel),
+                    message: `[logd/${moduleName}] ${body}`,
                 });
             }, 'replace');
         } catch {

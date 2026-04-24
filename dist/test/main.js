@@ -142,9 +142,28 @@ export default [ test('one', async () => {}) ];
         assert.equal(result.status, 0, result.stderr || result.stdout);
         assert.doesNotMatch(result.stdout, /Running \d+ test/i);
         assert.match(result.stdout, /section-tests — agent output/i);
-        assert.match(result.stdout, /PLAN \(grouped by file/i);
-        assert.match(result.stdout, /FINISH \| status=passed/i);
+        assert.match(result.stdout, /\bPLAN\b.*by file/i);
+        assert.match(result.stdout, /PASS.*teardown not-needed/i);
         assert.match(result.stdout, /SUMMARY/i);
+    },
+}), test('forwards logd with --test-logs or --agent-output (no extra flag needed for agent blocks)', {
+    timeout: 15000,
+    async run() {
+        const pattern = /\[logd\/section-tests-fixture\]\s+LOGD_DIRECT_INTEGRATION_MARKER/i;
+        const rel = './test/fixtures/logd-direct-usage.mjs';
+        for (const argv of [
+            [runnerPath, '--test-logs', '--jobs=1', rel],
+            [runnerPath, '--agent-output', '--jobs=1', rel],
+        ]) {
+            const result = spawnSync(process.execPath, [...argv], {
+                cwd: rootDirectory,
+                encoding: 'utf8',
+                env: process.env,
+            });
+            const out = stripAnsi(result.stdout);
+            assert.equal(result.status, 0, result.stderr || out);
+            assert.match(out, pattern, `expected logd in stdout for ${argv[1]}`);
+        }
     },
 }), test('runs tests in parallel with isolated runtime state', {
     timeout: 15000,
@@ -528,7 +547,7 @@ export default [
         assert.equal(frames.length, 1, 'progress is rendered through log-update; run header is still written only to output');
         assert.match(frames[0] || '', /0\/1/);
     },
-}), test('AgentPlainReporter prints a structured plan and one line per event', {
+}), test('AgentPlainReporter prints a structured plan and grouped detail per finished test', {
     async run() {
         const logs = await captureConsoleLogs(() => {
             const reporter = new AgentPlainReporter({});
@@ -543,6 +562,12 @@ export default [
                 type: 'phase-started',
                 ...eventBase(testCase, 'worker-1', 1),
                 phase: 'run',
+            });
+            reporter.onEvent({
+                type: 'test-log',
+                ...eventBase(testCase, 'worker-1', 1),
+                level: 'info',
+                message: 'hello from test\nsecond line',
             });
             reporter.onEvent({
                 type: 'test-finished',
@@ -571,12 +596,75 @@ export default [
         });
         const text = logs.join('\n');
         assert.match(text, /agent output/i);
-        assert.match(text, /PLAN \(grouped by file/i);
+        assert.match(text, /\bPLAN\b.*by file/i);
         assert.match(text, /Suite > Sub > alpha/);
-        assert.match(text, /START \| mode=parallel/);
-        assert.match(text, /PHASE-STARTED \| phase=run/);
-        assert.match(text, /FINISH \| status=passed/);
+        assert.match(text, /start.*mode=parallel/i);
+        assert.match(text, /run started/i);
+        assert.match(text, /PASS.*teardown not-needed/i);
+        assert.match(text, /\[info\].*hello from test/i);
         assert.match(text, /SUMMARY/);
+    },
+}), test('AgentPlainReporter prints captured test-log in the finished block before PASS', {
+    async run() {
+        const marker = 'AGENT_INLINE_LOG_MARKER_Q9';
+        const logs = await captureConsoleLogs(() => {
+            const reporter = new AgentPlainReporter({});
+            const testCase = createCollectedTest('inline-log', 'with logs before pass', ['AgentLogs'], '/tmp/agent-inline-logs.mjs', 0);
+            reporter.onPlan(createPlan([testCase]));
+            reporter.onEvent({
+                type: 'test-started',
+                ...eventBase(testCase, 'worker-1', 1),
+                mode: 'parallel',
+            });
+            reporter.onEvent({
+                type: 'phase-started',
+                ...eventBase(testCase, 'worker-1', 1),
+                phase: 'run',
+            });
+            reporter.onEvent({
+                type: 'test-log',
+                ...eventBase(testCase, 'worker-1', 1),
+                level: 'info',
+                message: marker,
+            });
+            reporter.onEvent({
+                type: 'phase-finished',
+                ...eventBase(testCase, 'worker-1', 1),
+                phase: 'run',
+            });
+            reporter.onEvent({
+                type: 'test-finished',
+                ...eventBase(testCase, 'worker-1', 1),
+                status: 'passed',
+                durationMs: 2,
+                prepareDurationMs: 1,
+                teardownStatus: 'not-needed',
+            });
+            reporter.onSummary({
+                ok: 1,
+                failed: 0,
+                total: 1,
+                durationMs: 8,
+                pass: true,
+                records: [{
+                        test: testCase,
+                        events: [],
+                        status: 'passed',
+                        durationMs: 2,
+                        prepareDurationMs: 1,
+                        teardownStatus: 'not-needed',
+                    }],
+            });
+            reporter.flush();
+        });
+        const text = stripAnsi(logs.join('\n'));
+        const iMarker = text.indexOf(marker);
+        const iPass = text.indexOf('PASS ');
+        const iSummary = text.indexOf('SUMMARY');
+        assert.ok(iMarker > 0, 'expected captured log in output');
+        assert.ok(iPass > iMarker, 'expected PASS after the log line in the same finished block');
+        assert.ok(iSummary > iPass, 'expected finished block before summary');
+        assert.match(text, new RegExp(`AgentLogs > with logs before pass[\\s\\S]*\\[info\\][\\s\\S]*${marker}[\\s\\S]*PASS[\\s\\S]*teardown not-needed`));
     },
 }), test('shows no worker lines before any slot has received work', {
     async run() {
@@ -824,6 +912,57 @@ export default [
         assert.equal(harness.getDoneCalls(), 1);
         assert.match(logs.join('\n'), /1 \/ 1 tests failed!/i);
         assert.match(logs.join('\n'), /run: broken slot - slot boom/i);
+    },
+}), test('prints test-log next to failure details when interactive and showTestLogs', {
+    async run() {
+        const testCase = createCollectedTest('fail-log', 'broke test', ['FailLog'], '/tmp/fl.mjs', 0);
+        const harness = createReporterHarness({
+            renderIntervalMs: 1,
+            workerSlots: 1,
+            showTestLogs: true,
+        });
+        const logEvent = {
+            type: 'test-log',
+            ...eventBase(testCase, 'worker-1', 1),
+            level: 'warn',
+            message: 'before it broke',
+        };
+        harness.reporter.onPlan(createPlan([testCase]));
+        harness.reporter.onEvent({
+            type: 'test-started',
+            ...eventBase(testCase, 'worker-1', 1),
+            mode: 'parallel',
+        });
+        harness.reporter.onEvent(logEvent);
+        harness.reporter.onSummary({
+            ok: 0,
+            failed: 1,
+            total: 1,
+            durationMs: 50,
+            pass: false,
+            records: [{
+                    test: testCase,
+                    events: [logEvent],
+                    status: 'failed',
+                    durationMs: 10,
+                    prepareDurationMs: 0,
+                    failure: {
+                        name: 'Error',
+                        message: 'it broke',
+                        stack: 'Error: it broke\n    at fl.mjs:1:1',
+                    },
+                    failurePhase: 'run',
+                    teardownStatus: 'not-needed',
+                }],
+        });
+        const logs = await captureConsoleLogs(() => {
+            harness.reporter.flush();
+        });
+        const text = logs.join('\n');
+        assert.doesNotMatch(text, /Test log \(from context\)/i, 'failed-test logs should not use the global tail block');
+        const idxLog = text.indexOf('before it broke');
+        const idxFail = text.indexOf('it broke');
+        assert.ok(idxLog >= 0 && idxFail > idxLog, 'expected captured log before failure line');
     },
 }), test('buffers context test-log in interactive mode and prints after flush when showTestLogs', {
     async run() {

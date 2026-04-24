@@ -1,13 +1,14 @@
 {
   "name": "section-tests",
-  "version": "5.0.15",
+  "version": "5.0.14",
   "description": "TDD for node.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc && cp -r src/lib/*.js dist/src/lib/",
     "prepublishOnly": "npm run build",
-    "test": "npm run build && node dist/bin/run.js  dist/test/main.js",
+    "test": "npm run build && node dist/bin/run.js dist/test/main.js",
+    "test:agent": "npm run build && node dist/bin/run.js --agent-output dist/test/main.js",
     "test:watch": "tsc --watch"
   },
   "repository": {

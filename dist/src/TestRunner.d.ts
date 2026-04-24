@@ -10,6 +10,8 @@ interface TestRunnerOptions {
     timeoutGraceMs?: number;
     /** Print buffered context / test-log output after the run. Off by default. */
     showTestLogs?: boolean;
+    /** Plain chronological log for tooling / AI agents instead of the default TTY reporter. */
+    agentOutput?: boolean;
 }
 interface WorkerJobState {
     test: CollectedTest;
@@ -37,6 +39,7 @@ export default class TestRunner {
     files?: string[];
     jsonSummary: boolean;
     showTestLogs: boolean;
+    agentOutput: boolean;
     jobs: number;
     reporters: Reporter[];
     timeoutPolicy: TimeoutPolicy;
@@ -45,7 +48,7 @@ export default class TestRunner {
     idleWaiters: Array<(worker: TimedOutWorkerState) => void>;
     workerSeq: number;
     shuttingDown: boolean;
-    constructor({ patterns, jsonSummary, showTestLogs, jobs, reporters, defaultTimeoutMs, timeoutGraceMs, }: TestRunnerOptions);
+    constructor({ patterns, jsonSummary, showTestLogs, agentOutput, jobs, reporters, defaultTimeoutMs, timeoutGraceMs, }: TestRunnerOptions);
     execute(): Promise<void>;
     emitJsonSummary(summary: TestRunSummary): void;
     resolvePatterns(): Promise<void>;

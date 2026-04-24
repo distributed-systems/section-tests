@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineTests, suite, test } from '../index.js';
+import AgentPlainReporter from '../src/AgentPlainReporter.js';
 import SpecReporter from '../src/SpecReporter.js';
 const rootDirectory = fileURLToPath(new URL('../..', import.meta.url));
 const sectionTestsImportUrl = pathToFileURL(join(rootDirectory, 'dist', 'index.js')).href;
@@ -126,7 +127,26 @@ export default defineTests(suite('API', test('passes setup results into run and 
     async teardown(payload) {
         assert.equal(payload.counter, 2);
     },
-})), suite('CLI', test('runs tests in parallel with isolated runtime state', {
+})), suite('CLI', test('uses agent-output mode without the default runner banner', {
+    timeout: 15000,
+    async run() {
+        const fixtureDirectory = await createFixtureFile('agent-plain.test.mjs', `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+export default [ test('one', async () => {}) ];
+`);
+        const result = spawnSync(process.execPath, [runnerPath, '--agent-output', '--jobs=1', './agent-plain.test.mjs'], {
+            cwd: fixtureDirectory,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        assert.doesNotMatch(result.stdout, /Running \d+ test/i);
+        assert.match(result.stdout, /section-tests — agent output/i);
+        assert.match(result.stdout, /PLAN \(grouped by file/i);
+        assert.match(result.stdout, /FINISH \| status=passed/i);
+        assert.match(result.stdout, /SUMMARY/i);
+    },
+}), test('runs tests in parallel with isolated runtime state', {
     timeout: 15000,
     async run() {
         const markerFile = join(await mkdtemp(join(tmpdir(), 'section-tests-parallel-')), 'results.jsonl');
@@ -507,6 +527,56 @@ export default [
         assert.ok(stripAnsi(header).includes(process.cwd()), 'expected run header to include the working directory');
         assert.equal(frames.length, 1, 'progress is rendered through log-update; run header is still written only to output');
         assert.match(frames[0] || '', /0\/1/);
+    },
+}), test('AgentPlainReporter prints a structured plan and one line per event', {
+    async run() {
+        const logs = await captureConsoleLogs(() => {
+            const reporter = new AgentPlainReporter({});
+            const testCase = createCollectedTest('a1', 'alpha', ['Suite', 'Sub'], '/tmp/x.mjs', 0);
+            reporter.onPlan(createPlan([testCase]));
+            reporter.onEvent({
+                type: 'test-started',
+                ...eventBase(testCase, 'worker-1', 1),
+                mode: 'parallel',
+            });
+            reporter.onEvent({
+                type: 'phase-started',
+                ...eventBase(testCase, 'worker-1', 1),
+                phase: 'run',
+            });
+            reporter.onEvent({
+                type: 'test-finished',
+                ...eventBase(testCase, 'worker-1', 1),
+                status: 'passed',
+                durationMs: 3,
+                prepareDurationMs: 1,
+                teardownStatus: 'not-needed',
+            });
+            reporter.onSummary({
+                ok: 1,
+                failed: 0,
+                total: 1,
+                durationMs: 10,
+                pass: true,
+                records: [{
+                        test: testCase,
+                        events: [],
+                        status: 'passed',
+                        durationMs: 3,
+                        prepareDurationMs: 1,
+                        teardownStatus: 'not-needed',
+                    }],
+            });
+            reporter.flush();
+        });
+        const text = logs.join('\n');
+        assert.match(text, /agent output/i);
+        assert.match(text, /PLAN \(grouped by file/i);
+        assert.match(text, /Suite > Sub > alpha/);
+        assert.match(text, /START \| mode=parallel/);
+        assert.match(text, /PHASE-STARTED \| phase=run/);
+        assert.match(text, /FINISH \| status=passed/);
+        assert.match(text, /SUMMARY/);
     },
 }), test('shows no worker lines before any slot has received work', {
     async run() {

@@ -2,18 +2,22 @@ import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import glob from '@distributed-systems/glob';
 import { DEFAULT_TEST_TIMEOUT } from './api.js';
+import AgentPlainReporter from './AgentPlainReporter.js';
 import SpecReporter from './SpecReporter.js';
 import { collectTestPlan } from './collection.js';
 export const SECTION_TESTS_JSON_SUMMARY_PREFIX = 'SECTION_TESTS_SUMMARY:';
 export default class TestRunner {
-    constructor({ patterns, jsonSummary = false, showTestLogs = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, }) {
+    constructor({ patterns, jsonSummary = false, showTestLogs = false, agentOutput = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, }) {
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
         this.showTestLogs = showTestLogs;
+        this.agentOutput = agentOutput;
         this.jobs = Math.max(1, jobs);
         this.reporters = reporters.length
             ? reporters
-            : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
+            : this.agentOutput
+                ? [new AgentPlainReporter({ showTestLogs: this.showTestLogs })]
+                : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
         this.timeoutPolicy = {
             defaultTimeoutMs,
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,
@@ -69,9 +73,11 @@ export default class TestRunner {
             }
             this.reporters.forEach((reporter) => reporter.onEvent(event));
         };
-        console.log(`Running ${plan.tests.length} tests with up to ${workerSlots} in parallel`
-            + (serialTests.length ? ` (${serialTests.length} serial)` : ''));
-        console.log('');
+        if (!this.agentOutput) {
+            console.log(`Running ${plan.tests.length} tests with up to ${workerSlots} in parallel`
+                + (serialTests.length ? ` (${serialTests.length} serial)` : ''));
+            console.log('');
+        }
         await this.initializePool(handleEvent, workerSlots);
         await this.executeQueue(parallelTests, workerSlots, handleEvent);
         await this.executeQueue(serialTests, 1, handleEvent);

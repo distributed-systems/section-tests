@@ -35,8 +35,9 @@ Each option accepts either `--name=value` or `--name value` (the value must be t
 | `--timeout-grace=<ms>` | — | After a phase timeout, how long the worker may keep running before the parent force-terminates it if cleanup is still stuck. If omitted, the runner uses twice the configured default test timeout (`--timeout` / `defaultTimeoutMs`, default 2000 ms). |
 | `--json-summary` | `SECTION_TESTS_JSON_SUMMARY=1` | Emit one machine-readable JSON line on **stderr** when the suite ends, prefixed with `SECTION_TESTS_SUMMARY:` (see `SECTION_TESTS_JSON_SUMMARY_PREFIX` in the API). |
 | `--test-logs` | `SECTION_TESTS_TEST_LOGS=1` | After the run, print buffered `context` / test-log output from tests (by default the interactive reporter hides these until the end; this flag turns them on). When enabled, workers also try to load the optional **`logd`** dependency and register a sink so logd output is turned into `test-log` lines (captured like context logs) instead of going straight to the console during the run. If `logd` is not installed, workers continue normally. |
+| `--agent-output` | `SECTION_TESTS_AGENT_OUTPUT=1` | Use **`AgentPlainReporter`** instead of the default TTY board: a plain, line-oriented trace (plan grouped by file and suite, then one `console.log` per event, then a text summary). Intended for scripts and AI agents; the default interactive UI is unchanged when this flag is off. If you construct **`TestRunner`** with an explicit `reporters` array, the CLI flag does not apply—add **`new AgentPlainReporter()`** to that array yourself if you want this format alongside other reporters. |
 
-Boolean flags (`--json-summary`, `--test-logs`) are presence-only; there is no `--no-*` form in the CLI parser.
+Boolean flags (`--json-summary`, `--test-logs`, `--agent-output`) are presence-only; there is no `--no-*` form in the CLI parser.
 
 Example:
 
@@ -162,6 +163,7 @@ test('times out cleanly', {
 
 ## Exports
 
+- `AgentPlainReporter` — optional plain-text reporter (see `--agent-output`).
 - `test(name, run)`
 - `test(name, { setup, run, teardown, timeout, mode })`
 - `serial(name, run | options)`

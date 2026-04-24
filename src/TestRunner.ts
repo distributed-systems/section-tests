@@ -2,6 +2,7 @@ import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import glob from '@distributed-systems/glob';
 import { DEFAULT_TEST_TIMEOUT } from './api.js';
+import AgentPlainReporter from './AgentPlainReporter.js';
 import SpecReporter from './SpecReporter.js';
 import { collectTestPlan } from './collection.js';
 import {
@@ -32,6 +33,8 @@ interface TestRunnerOptions {
     timeoutGraceMs?: number;
     /** Print buffered context / test-log output after the run. Off by default. */
     showTestLogs?: boolean;
+    /** Plain chronological log for tooling / AI agents instead of the default TTY reporter. */
+    agentOutput?: boolean;
 }
 
 interface WorkerJobState {
@@ -62,6 +65,7 @@ export default class TestRunner {
     files?: string[];
     jsonSummary: boolean;
     showTestLogs: boolean;
+    agentOutput: boolean;
     jobs: number;
     reporters: Reporter[];
     timeoutPolicy: TimeoutPolicy;
@@ -75,6 +79,7 @@ export default class TestRunner {
         patterns,
         jsonSummary = false,
         showTestLogs = false,
+        agentOutput = false,
         jobs = Math.max(1, availableParallelism()),
         reporters = [],
         defaultTimeoutMs = DEFAULT_TEST_TIMEOUT,
@@ -83,10 +88,13 @@ export default class TestRunner {
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
         this.showTestLogs = showTestLogs;
+        this.agentOutput = agentOutput;
         this.jobs = Math.max(1, jobs);
         this.reporters = reporters.length
             ? reporters
-            : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
+            : this.agentOutput
+                ? [new AgentPlainReporter({ showTestLogs: this.showTestLogs })]
+                : [new SpecReporter({ workerSlots: this.jobs, showTestLogs: this.showTestLogs })];
         this.timeoutPolicy = {
             defaultTimeoutMs,
             timeoutGraceMs: timeoutGraceMs ?? defaultTimeoutMs * 2,
@@ -152,11 +160,13 @@ export default class TestRunner {
             this.reporters.forEach((reporter) => reporter.onEvent(event));
         };
 
-        console.log(
-            `Running ${plan.tests.length} tests with up to ${workerSlots} in parallel`
-            + (serialTests.length ? ` (${serialTests.length} serial)` : ''),
-        );
-        console.log('');
+        if (!this.agentOutput) {
+            console.log(
+                `Running ${plan.tests.length} tests with up to ${workerSlots} in parallel`
+                + (serialTests.length ? ` (${serialTests.length} serial)` : ''),
+            );
+            console.log('');
+        }
 
         await this.initializePool(handleEvent, workerSlots);
         await this.executeQueue(parallelTests, workerSlots, handleEvent);

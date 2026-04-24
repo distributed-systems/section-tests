@@ -106,12 +106,17 @@ function waitForRunToSettleOrStuck(
                 resolve('stuck');
             }
         }, quiesceMs);
-        runTask.finally(() => {
-            if (done) return;
-            done = true;
-            clearTimeout(onDeadline);
-            resolve('settled');
-        });
+        // After a run timeout the in-flight `runTask` may still reject; without a terminal `.catch`
+        // that rejection becomes an unhandled rejection (red Node noise) even though the parent
+        // already recorded a timeout failure.
+        void runTask
+            .finally(() => {
+                if (done) return;
+                done = true;
+                clearTimeout(onDeadline);
+                resolve('settled');
+            })
+            .catch(() => undefined);
     });
 }
 
@@ -540,7 +545,6 @@ async function executeTest(test: CollectedTest): Promise<void> {
             }
 
             controller.abort();
-            currentExecution = null;
 
             if (failurePhase === 'worker') {
                 retireReason = retireReason || 'unexpected-error';
@@ -567,6 +571,8 @@ async function executeTest(test: CollectedTest): Promise<void> {
             if (retireReason) {
                 emitRetire(retireReason, test, timeout);
             }
+
+            currentExecution = null;
         }
     } catch (err) {
         const finishedEvent: TestFinishedEvent = {
@@ -585,6 +591,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
         };
 
         emit(finishedEvent);
+        currentExecution = null;
     } finally {
         activeTestForSink = null;
         busy = false;

@@ -412,7 +412,10 @@ class SpecReporter {
     displayFailureDetails() {
         if (!this.summary)
             return;
-        const failedRecords = this.summary.records.filter((record) => record.status === 'failed' && record.failure);
+        // Match `TestRunSummary.failed` / `ok` semantics (`status !== 'passed'`), not `status === 'failed'`
+        // only — otherwise a non-passing record without `failure` would count in the banner but never
+        // appear in this block.
+        const failedRecords = this.summary.records.filter((record) => record.status !== 'passed');
         if (!failedRecords.length)
             return;
         const labelFor = (test) => this.describeTest({ test });
@@ -424,15 +427,25 @@ class SpecReporter {
                     this.printTestLog(labelFor(record.test), ev.level, ev.message);
                 }
             }
-            console.log(`${chalk.red(record.failurePhase || 'run')}: ${chalk.white(record.test.name)} - ${chalk.white(record.failure.message)}`);
-            if (record.failure?.stack) {
-                record.failure.stack
-                    .split('\n')
-                    .filter((line) => line.trim().length > 0)
-                    .slice(0, 8)
-                    .forEach((line) => {
-                    console.log(`${this.pad(4)}${chalk.dim(line.trim())}`);
-                });
+            const phase = record.failurePhase || 'run';
+            const name = record.test.name;
+            if (record.failure) {
+                console.log(`${chalk.red(phase)}: ${chalk.white(name)} - ${chalk.white(record.failure.message)}`);
+                if (record.failure.stack) {
+                    record.failure.stack
+                        .split('\n')
+                        .filter((line) => line.trim().length > 0)
+                        .slice(0, 8)
+                        .forEach((line) => {
+                        console.log(`${this.pad(4)}${chalk.dim(line.trim())}`);
+                    });
+                }
+            }
+            else {
+                const hint = record.timeout
+                    ? `timeout ${record.timeout.phase} ${record.timeout.timeoutMs} ms`
+                    : '(no failure payload)';
+                console.log(`${chalk.red(phase)}: ${chalk.white(name)} - ${chalk.dim(hint)}`);
             }
             console.log('');
         }

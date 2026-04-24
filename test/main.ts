@@ -40,6 +40,12 @@ function stripAnsi(text: string): string {
         .replace(/\u001B\][^\u0007]*(\u0007|\u001B\\)/g, '');
 }
 
+function assertProcessOutputHasNoUnhandledRejection(result: { stderr?: string; stdout?: string }): void {
+    const combined = stripAnsi(`${result.stderr ?? ''}\n${result.stdout ?? ''}`);
+    assert.doesNotMatch(combined, /UnhandledPromiseRejection/i);
+    assert.doesNotMatch(combined, /Unhandled promise rejection/i);
+}
+
 function createCollectedTest(
     id: string,
     name: string,
@@ -209,6 +215,62 @@ export default [ test('one', async () => {}) ];
                     assert.equal(result.status, 0, result.stderr || out);
                     assert.match(out, pattern, `expected logd in stdout for ${argv[1]}`);
                 }
+            },
+        }),
+
+        test('does not leak unhandled rejection when run promise rejects after timeout quiesce', {
+            timeout: 20_000,
+            async run() {
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, '--jobs=1', './test/fixtures/late-reject-after-run-timeout.mjs'],
+                    {
+                        cwd: rootDirectory,
+                        encoding: 'utf8',
+                        env: process.env,
+                    },
+                );
+                assertProcessOutputHasNoUnhandledRejection(result);
+                assert.equal(result.status, 1, 'timed-out / stuck run should fail the suite');
+                const out = stripAnsi(`${result.stdout ?? ''}${result.stderr ?? ''}`);
+                assert.match(out, /timeout|failed|POST_STUCK|stuck/i);
+            },
+        }),
+
+        test('fails the suite when only teardown throws', {
+            timeout: 15_000,
+            async run() {
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, '--jobs=1', './test/fixtures/teardown-only-fails.mjs'],
+                    {
+                        cwd: rootDirectory,
+                        encoding: 'utf8',
+                        env: process.env,
+                    },
+                );
+                assertProcessOutputHasNoUnhandledRejection(result);
+                assert.equal(result.status, 1);
+                const out = stripAnsi(`${result.stdout ?? ''}${result.stderr ?? ''}`);
+                assert.match(out, /teardown/i);
+                assert.match(out, /TEARDOWN_ONLY_THROW/i);
+            },
+        }),
+
+        test('passes when only context.error is used (log is not a failure)', {
+            timeout: 15_000,
+            async run() {
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, '--jobs=1', './test/fixtures/context-error-still-passes.mjs'],
+                    {
+                        cwd: rootDirectory,
+                        encoding: 'utf8',
+                        env: process.env,
+                    },
+                );
+                assertProcessOutputHasNoUnhandledRejection(result);
+                assert.equal(result.status, 0);
             },
         }),
 
@@ -546,6 +608,7 @@ export default [
 
                 assert.equal(result.status, 1, 'teardown failure should exit non-zero');
                 assert.match(result.stdout, /teardown failed/i);
+                assertProcessOutputHasNoUnhandledRejection(result);
 
                 const lines = await readJsonLines(markerFile);
                 assert.equal(lines.length, 2);
@@ -1104,6 +1167,53 @@ export default [
                 assert.equal(harness.getDoneCalls(), 1);
                 assert.match(logs.join('\n'), /1 \/ 1 tests failed!/i);
                 assert.match(logs.join('\n'), /run: broken slot - slot boom/i);
+            },
+        }),
+
+        test('prints timeout-only failures in final failure details', {
+            async run() {
+                const testCase = createCollectedTest('summary-timeout', 'timed out slot', ['SummarySuite'], '/tmp/summary-timeout.test.mjs', 0);
+                const harness = createReporterHarness({
+                    renderIntervalMs: 1,
+                    workerSlots: 1,
+                });
+
+                harness.reporter.onPlan(createPlan([testCase]));
+                harness.reporter.onEvent({
+                    type: 'test-started',
+                    ...eventBase(testCase, 'worker-1', 1),
+                    mode: 'parallel',
+                });
+                harness.reporter.onSummary({
+                    ok: 0,
+                    failed: 1,
+                    total: 1,
+                    durationMs: 125,
+                    pass: false,
+                    records: [{
+                        test: testCase,
+                        events: [],
+                        status: 'failed',
+                        durationMs: 10,
+                        prepareDurationMs: 5,
+                        failurePhase: 'run',
+                        timeout: {
+                            phase: 'run',
+                            timeoutMs: 125,
+                        },
+                        teardownStatus: 'not-run',
+                    } satisfies TestExecutionRecord],
+                });
+
+                const logs = await captureConsoleLogs(() => {
+                    harness.reporter.flush();
+                });
+                const text = logs.join('\n');
+
+                assert.equal(harness.getClearCalls(), 0);
+                assert.equal(harness.getDoneCalls(), 1);
+                assert.match(text, /1 \/ 1 tests failed!/i);
+                assert.match(text, /run: timed out slot - timeout run 125 ms/i);
             },
         }),
 

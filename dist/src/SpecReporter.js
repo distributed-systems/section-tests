@@ -428,7 +428,7 @@ class SpecReporter {
                 }
             }
             const phase = record.failurePhase || 'run';
-            const name = record.test.name;
+            const name = labelFor(record.test);
             if (record.failure) {
                 console.log(`${chalk.red(phase)}: ${chalk.white(name)} - ${chalk.white(record.failure.message)}`);
                 if (record.failure.stack) {

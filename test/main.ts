@@ -1189,7 +1189,7 @@ export default [
                 assert.equal(harness.getClearCalls(), 0);
                 assert.equal(harness.getDoneCalls(), 1);
                 assert.match(logs.join('\n'), /1 \/ 1 tests failed!/i);
-                assert.match(logs.join('\n'), /run: broken slot - slot boom/i);
+                assert.match(logs.join('\n'), /run: SummarySuite > broken slot - slot boom/i);
             },
         }),
 
@@ -1236,7 +1236,7 @@ export default [
                 assert.equal(harness.getClearCalls(), 0);
                 assert.equal(harness.getDoneCalls(), 1);
                 assert.match(text, /1 \/ 1 tests failed!/i);
-                assert.match(text, /run: timed out slot - timeout run 125 ms/i);
+                assert.match(text, /run: SummarySuite > timed out slot - timeout run 125 ms/i);
             },
         }),
 

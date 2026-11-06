@@ -48,6 +48,7 @@ export default class SpecReporter implements Reporter {
     private renderNow;
     private clearPendingRender;
     private renderInteractiveBoard;
+    /** Must match `COVERAGE_PROGRESS_BAR_WIDTH` in `coverage/report.ts` (coverage terminal bars). */
     private static readonly progressBarWidth;
     private formatProgressLine;
     private renderSlotLines;

@@ -1,6 +1,12 @@
 import { Worker } from 'node:worker_threads';
-import { CollectedTest, Reporter, SerializedError, TeardownStatus, TestEvent, TestRunSummary, TimeoutInfo, TimeoutPolicy, WorkerRetireMessage, WorkerTerminationInfo } from './runtime-types.js';
+import { CollectedTest, PreciseCoverageSnapshotJson, Reporter, SerializedError, TeardownStatus, TestEvent, TestRunSummary, TimeoutInfo, TimeoutPolicy, WorkerRetireMessage, WorkerTerminationInfo } from './runtime-types.js';
 export declare const SECTION_TESTS_JSON_SUMMARY_PREFIX = "SECTION_TESTS_SUMMARY:";
+export interface CoverageCliOptions {
+    include: string[];
+    exclude: string[];
+    report: 'lcov' | 'none';
+    min?: number;
+}
 interface TestRunnerOptions {
     patterns: string[];
     jsonSummary?: boolean;
@@ -12,6 +18,7 @@ interface TestRunnerOptions {
     showTestLogs?: boolean;
     /** Plain chronological log for tooling / AI agents instead of the default TTY reporter. */
     agentOutput?: boolean;
+    coverage?: CoverageCliOptions;
 }
 interface WorkerJobState {
     test: CollectedTest;
@@ -33,6 +40,13 @@ interface TimedOutWorkerState {
     workerTermination?: WorkerTerminationInfo;
     replacementSpawned: boolean;
     state: 'starting' | 'idle' | 'busy' | 'retiring' | 'exited';
+    /** V8 precise coverage from this worker (after cooperative shutdown). */
+    coverageSnapshot?: PreciseCoverageSnapshotJson;
+    coverageError?: string;
+    coverageDeliveryTimedOut?: boolean;
+    pendingCoverageResolve?: () => void;
+    retirePendingShutdown?: boolean;
+    coverageShutDownStarted?: boolean;
 }
 export default class TestRunner {
     patterns: string[];
@@ -48,7 +62,11 @@ export default class TestRunner {
     idleWaiters: Array<(worker: TimedOutWorkerState) => void>;
     workerSeq: number;
     shuttingDown: boolean;
-    constructor({ patterns, jsonSummary, showTestLogs, agentOutput, jobs, reporters, defaultTimeoutMs, timeoutGraceMs, }: TestRunnerOptions);
+    coverage?: CoverageCliOptions;
+    /** Every spawned worker state for end-of-run shutdown (includes replaced workers until exit). */
+    private workerRegistry;
+    private coverageIncomplete;
+    constructor({ patterns, jsonSummary, showTestLogs, agentOutput, jobs, reporters, defaultTimeoutMs, timeoutGraceMs, coverage, }: TestRunnerOptions);
     execute(): Promise<void>;
     emitJsonSummary(summary: TestRunSummary): void;
     resolvePatterns(): Promise<void>;
@@ -61,6 +79,12 @@ export default class TestRunner {
     initializePool(handleEvent: (event: TestEvent) => void, workerSlots: number): Promise<void>;
     spawnWorker(handleEvent: (event: TestEvent) => void, slot: number): Promise<TimedOutWorkerState>;
     handleWorkerRetire(state: TimedOutWorkerState, message: WorkerRetireMessage, handleEvent: (event: TestEvent) => void): void;
+    /**
+     * Ask worker to send V8 coverage; wait up to `timeoutGraceMs` for `coverage-result`, then terminate.
+     */
+    requestCooperativeShutdown(state: TimedOutWorkerState): Promise<void>;
+    /** After tests complete, collect coverage from every worker that is still alive. */
+    shutdownIdleWorkersForCoverage(): Promise<void>;
     acquireIdleWorker(): Promise<TimedOutWorkerState>;
     releaseIdleWorker(worker: TimedOutWorkerState): void;
     removeIdleWorker(worker: TimedOutWorkerState): void;

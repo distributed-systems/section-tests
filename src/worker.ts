@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
 import { collectEntriesFromFile, resolveCollectedTestFromEntries } from './collection.js';
+import V8PreciseCoverageSession from './coverage/v8-session.js';
 import {
     CollectedTest,
     LogLevel,
@@ -15,6 +16,7 @@ import {
     TimeoutInfo,
     WorkerBootstrapData,
     WorkerCommand,
+    PreciseCoverageSnapshotJson,
     WorkerLifecycleMessage,
     WorkerMessage,
     WorkerRetireReason,
@@ -131,7 +133,12 @@ interface ExecutionState {
 }
 
 const port = requireParentPort();
-const { workerId, captureLogd = false, captureConsoleOutput = false } = workerData as WorkerBootstrapData;
+const {
+    workerId,
+    captureLogd = false,
+    captureConsoleOutput = false,
+    coverageEnabled = false,
+} = workerData as WorkerBootstrapData;
 const fileCache = new Map<string, FileCacheEntry>();
 let busy = false;
 let retiring = false;
@@ -140,6 +147,9 @@ let currentExecution: ExecutionState | null = null;
 /** Current test while `executeTest` runs; used to attribute optional `logd` sink lines to `test-log`. */
 let activeTestForSink: CollectedTest | null = null;
 let writingCapturedStream = false;
+let coverageSession: V8PreciseCoverageSession | null = null;
+let coverageStartError: string | null = null;
+let awaitingCoverageAck = false;
 
 function emit(message: WorkerMessage): void {
     port.postMessage(message);
@@ -147,6 +157,53 @@ function emit(message: WorkerMessage): void {
 
 function emitLifecycle(message: WorkerLifecycleMessage): void {
     emit(message);
+}
+
+async function startCoverageIfEnabled(): Promise<void> {
+    if (!coverageEnabled) return;
+    try {
+        const session = new V8PreciseCoverageSession();
+        await session.start();
+        coverageSession = session;
+    } catch (err) {
+        coverageStartError = err instanceof Error ? err.message : String(err);
+    }
+}
+
+async function finalizeCoverageAndExit(): Promise<void> {
+    if (!coverageEnabled) {
+        process.exit(0);
+        return;
+    }
+    const finishPayload = (payload?: PreciseCoverageSnapshotJson, error?: string) => {
+        emitLifecycle({
+            type: 'coverage-result',
+            workerId,
+            payload,
+            error,
+        });
+        awaitingCoverageAck = true;
+    };
+
+    if (coverageStartError) {
+        finishPayload(undefined, coverageStartError);
+        return;
+    }
+    const session = coverageSession;
+    coverageSession = null;
+    try {
+        if (!session) {
+            finishPayload(undefined, 'section-tests: coverage session missing.');
+            return;
+        }
+        const raw = await session.takeSnapshot();
+        await session.stop();
+        const payload = JSON.parse(JSON.stringify(raw)) as PreciseCoverageSnapshotJson;
+        finishPayload(payload, undefined);
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        finishPayload(undefined, msg);
+    }
 }
 
 function emitRetire(reason: WorkerRetireReason, test?: CollectedTest, timeout?: TimeoutInfo): void {
@@ -282,6 +339,7 @@ function installConsoleCapture(): void {
 }
 
 async function bootstrapWorker(): Promise<void> {
+    await startCoverageIfEnabled();
     if (captureConsoleOutput) {
         installConsoleCapture();
     }
@@ -655,7 +713,7 @@ async function executeTest(test: CollectedTest): Promise<void> {
         busy = false;
 
         if (shuttingDown) {
-            process.exit(0);
+            void finalizeCoverageAndExit();
             return;
         }
 
@@ -669,9 +727,16 @@ async function executeTest(test: CollectedTest): Promise<void> {
 }
 
 port.on('message', (message: WorkerCommand) => {
+    if (message.type === 'coverage-ack') {
+        if (awaitingCoverageAck) {
+            process.exit(0);
+        }
+        return;
+    }
+
     if (message.type === 'shutdown') {
         shuttingDown = true;
-        if (!busy) process.exit(0);
+        if (!busy) void finalizeCoverageAndExit();
         return;
     }
 

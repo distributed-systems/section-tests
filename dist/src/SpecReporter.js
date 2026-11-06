@@ -605,6 +605,7 @@ class SpecReporter {
         return ' '.repeat(amount);
     }
 }
+/** Must match `COVERAGE_PROGRESS_BAR_WIDTH` in `coverage/report.ts` (coverage terminal bars). */
 SpecReporter.progressBarWidth = 80;
 export default SpecReporter;
 //# sourceMappingURL=SpecReporter.js.map

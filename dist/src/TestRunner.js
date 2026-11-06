@@ -3,16 +3,23 @@ import { Worker } from 'node:worker_threads';
 import glob from '@distributed-systems/glob';
 import { DEFAULT_TEST_TIMEOUT } from './api.js';
 import AgentPlainReporter from './AgentPlainReporter.js';
+import { mergeCoverage, resolveEligibleFiles } from './coverage/aggregate.js';
+import { formatCoverageTerminal, overallMeasuredLinePercent, writeLcov } from './coverage/report.js';
+import V8PreciseCoverageSession from './coverage/v8-session.js';
 import SpecReporter from './SpecReporter.js';
 import { collectTestPlan } from './collection.js';
 export const SECTION_TESTS_JSON_SUMMARY_PREFIX = 'SECTION_TESTS_SUMMARY:';
 export default class TestRunner {
-    constructor({ patterns, jsonSummary = false, showTestLogs = false, agentOutput = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, }) {
+    constructor({ patterns, jsonSummary = false, showTestLogs = false, agentOutput = false, jobs = Math.max(1, availableParallelism()), reporters = [], defaultTimeoutMs = DEFAULT_TEST_TIMEOUT, timeoutGraceMs, coverage, }) {
+        /** Every spawned worker state for end-of-run shutdown (includes replaced workers until exit). */
+        this.workerRegistry = [];
+        this.coverageIncomplete = false;
         this.patterns = patterns;
         this.jsonSummary = jsonSummary;
         this.showTestLogs = showTestLogs;
         this.agentOutput = agentOutput;
         this.jobs = Math.max(1, jobs);
+        this.coverage = coverage;
         this.reporters = reporters.length
             ? reporters
             : this.agentOutput
@@ -31,9 +38,52 @@ export default class TestRunner {
     async execute() {
         const start = Date.now();
         await this.resolvePatterns();
-        const plan = await collectTestPlan(this.files || [], {
-            defaultTimeoutMs: this.timeoutPolicy.defaultTimeoutMs,
-        });
+        let mainThreadCoverage;
+        const coverageDiscoverySession = this.coverage ? new V8PreciseCoverageSession() : null;
+        let mainCoverageSessionStarted = false;
+        if (coverageDiscoverySession) {
+            try {
+                await coverageDiscoverySession.start();
+                mainCoverageSessionStarted = true;
+            }
+            catch {
+                this.coverageIncomplete = true;
+                process.stderr.write('section-tests: coverage: failed to start main-thread V8 session.\n');
+            }
+        }
+        let plan;
+        try {
+            plan = await collectTestPlan(this.files || [], {
+                defaultTimeoutMs: this.timeoutPolicy.defaultTimeoutMs,
+            });
+        }
+        finally {
+            if (coverageDiscoverySession && mainCoverageSessionStarted) {
+                try {
+                    const snap = await coverageDiscoverySession.takeSnapshot();
+                    await coverageDiscoverySession.stop();
+                    mainThreadCoverage = JSON.parse(JSON.stringify(snap));
+                }
+                catch {
+                    this.coverageIncomplete = true;
+                    process.stderr.write('section-tests: coverage: failed to collect main-thread snapshot.\n');
+                    try {
+                        await coverageDiscoverySession.stop();
+                    }
+                    catch {
+                        /* ignore */
+                    }
+                }
+            }
+            else if (coverageDiscoverySession) {
+                try {
+                    await coverageDiscoverySession.stop();
+                }
+                catch {
+                    /* ignore */
+                }
+            }
+        }
         const parallelTests = plan.tests.filter((test) => test.mode !== 'serial');
         const serialTests = plan.tests.filter((test) => test.mode === 'serial');
         const workerSlots = Math.max(1, Math.min(this.jobs, parallelTests.length || 1));
@@ -83,6 +133,7 @@ export default class TestRunner {
         await this.executeQueue(serialTests, 1, handleEvent);
         await this.drainTimedOutWorkers(handleEvent);
         this.shuttingDown = true;
+        await this.shutdownIdleWorkersForCoverage();
         const orderedRecords = plan.tests.map((test) => {
             const record = records.get(test.id);
             if (record)
@@ -113,7 +164,42 @@ export default class TestRunner {
         this.reporters.forEach((reporter) => reporter.flush?.());
         if (this.jsonSummary)
             this.emitJsonSummary(summary);
-        process.exit(summary.pass ? 0 : 1);
+        let exitCode = summary.pass ? 0 : 1;
+        if (this.coverage) {
+            const covParts = [];
+            if (mainThreadCoverage)
+                covParts.push(mainThreadCoverage);
+            for (const w of this.workerRegistry) {
+                if (w.coverageSnapshot)
+                    covParts.push(w.coverageSnapshot);
+                if (w.coverageError) {
+                    this.coverageIncomplete = true;
+                    process.stderr.write(`section-tests: coverage: worker ${w.id}: ${w.coverageError}\n`);
+                }
+            }
+            if (this.coverageIncomplete) {
+                process.stderr.write('section-tests: coverage: incomplete (see messages above).\n');
+                exitCode = 1;
+            }
+            const cwd = process.cwd();
+            const eligible = await resolveEligibleFiles(cwd, this.coverage.include, this.coverage.exclude);
+            const merge = mergeCoverage(cwd, covParts, eligible);
+            if (merge.unmeasuredEligible.length > 0 && this.coverage.min !== undefined) {
+                process.stderr.write('section-tests: coverage: --coverage-min cannot be satisfied while eligible files are unmeasured (never loaded).\n');
+                exitCode = 1;
+            }
+            const overall = overallMeasuredLinePercent(merge);
+            if (this.coverage.min !== undefined && merge.unmeasuredEligible.length === 0 && overall < this.coverage.min) {
+                process.stderr.write(`section-tests: coverage: line ${overall.toFixed(1)}% is below --coverage-min=${this.coverage.min}.\n`);
+                exitCode = 1;
+            }
+            const coveragePlain = this.agentOutput || this.jsonSummary || !process.stdout.isTTY;
+            console.log(formatCoverageTerminal(merge, merge.fileStats.size === 0 ? 0 : overall, { plain: coveragePlain }));
+            if (this.coverage.report === 'lcov') {
+                await writeLcov(cwd, merge);
+            }
+        }
+        process.exit(exitCode);
     }
     emitJsonSummary(summary) {
         process.stderr.write(`${SECTION_TESTS_JSON_SUMMARY_PREFIX}${JSON.stringify({
@@ -192,7 +278,7 @@ export default class TestRunner {
                 state.finishedEventSeen = true;
                 state.currentJob = undefined;
             }
-            await state.worker.terminate();
+            await this.requestCooperativeShutdown(state);
             await state.exitPromise.catch(() => undefined);
             this.timedOutWorkers.delete(state.id);
         }));
@@ -285,6 +371,7 @@ export default class TestRunner {
                 captureConsoleOutput: this.agentOutput
                     || this.showTestLogs
                     || (this.reporters.some((reporter) => reporter instanceof SpecReporter) && Boolean(process.stdout.isTTY)),
+                coverageEnabled: Boolean(this.coverage),
             },
         });
         const state = {
@@ -304,7 +391,27 @@ export default class TestRunner {
             replacementSpawned: false,
             state: 'starting',
         };
+        this.workerRegistry.push(state);
         worker.on('message', (message) => {
+            if (message.type === 'coverage-result') {
+                const cr = message;
+                if (cr.payload !== undefined) {
+                    state.coverageSnapshot = cr.payload;
+                }
+                if (cr.error) {
+                    state.coverageError = cr.error;
+                    this.coverageIncomplete = true;
+                }
+                try {
+                    state.worker.postMessage({ type: 'coverage-ack' });
+                }
+                catch {
+                    /* ignore */
+                }
+                state.pendingCoverageResolve?.();
+                state.pendingCoverageResolve = undefined;
+                return;
+            }
             if (message.type === 'worker-ready') {
                 state.state = 'idle';
                 this.releaseIdleWorker(state);
@@ -369,6 +476,16 @@ export default class TestRunner {
             resolveReady();
             this.removeIdleWorker(state);
             this.timedOutWorkers.delete(state.id);
+            if (this.coverage && state.coverageShutDownStarted && state.coverageSnapshot === undefined && state.coverageError === undefined) {
+                this.coverageIncomplete = true;
+                state.coverageError = `worker exited before coverage-result (code ${code}).`;
+            }
+            else if (this.coverage && !state.coverageShutDownStarted && state.coverageSnapshot === undefined && state.coverageError === undefined) {
+                this.coverageIncomplete = true;
+                state.coverageError = `worker exited before coverage collection (code ${code}).`;
+            }
+            state.pendingCoverageResolve?.();
+            state.pendingCoverageResolve = undefined;
             const test = state.currentJob?.test;
             if (test && state.timedOutAt && !state.finishedEventSeen) {
                 handleEvent(this.buildTimedOutFailureEvent(state, state.workerTermination));
@@ -401,7 +518,88 @@ export default class TestRunner {
             this.timedOutWorkers.set(state.id, state);
             return;
         }
-        void state.worker.terminate();
+        if (this.coverage) {
+            void this.requestCooperativeShutdown(state);
+        }
+        else {
+            void state.worker.terminate();
+        }
+    }
+    /**
+     * Ask worker to send V8 coverage; wait up to `timeoutGraceMs` for `coverage-result`, then terminate.
+     */
+    async requestCooperativeShutdown(state) {
+        if (state.exited) {
+            await state.exitPromise.catch(() => undefined);
+            return;
+        }
+        if (!this.coverage) {
+            try {
+                await state.worker.terminate();
+            }
+            catch {
+                /* ignore */
+            }
+            await state.exitPromise.catch(() => undefined);
+            return;
+        }
+        if (state.coverageShutDownStarted) {
+            await state.exitPromise.catch(() => undefined);
+            return;
+        }
+        state.coverageShutDownStarted = true;
+        if (state.coverageSnapshot !== undefined || state.coverageError !== undefined) {
+            try {
+                await state.worker.terminate();
+            }
+            catch {
+                /* ignore */
+            }
+            await state.exitPromise.catch(() => undefined);
+            return;
+        }
+        try {
+            state.worker.postMessage({ type: 'shutdown' });
+        }
+        catch {
+            this.coverageIncomplete = true;
+            state.coverageError = 'failed to post shutdown to worker';
+            try {
+                await state.worker.terminate();
+            }
+            catch {
+                /* ignore */
+            }
+            await state.exitPromise.catch(() => undefined);
+            return;
+        }
+        await Promise.race([
+            new Promise((resolve) => {
+                state.pendingCoverageResolve = resolve;
+            }),
+            state.exitPromise,
+            new Promise((resolve) => setTimeout(resolve, this.timeoutPolicy.timeoutGraceMs)),
+        ]);
+        state.pendingCoverageResolve = undefined;
+        if (!state.exited && state.coverageSnapshot === undefined && state.coverageError === undefined) {
+            this.coverageIncomplete = true;
+            state.coverageDeliveryTimedOut = true;
+            process.stderr.write(`section-tests: coverage: ${state.id} (slot ${state.slot}) did not send coverage within ${this.timeoutPolicy.timeoutGraceMs}ms; forcing terminate.\n`);
+            try {
+                await state.worker.terminate();
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        await state.exitPromise.catch(() => undefined);
+    }
+    /** After tests complete, collect coverage from every worker that is still alive. */
+    async shutdownIdleWorkersForCoverage() {
+        if (!this.coverage)
+            return;
+        const alive = this.workerRegistry.filter((w) => !w.exited);
+        await Promise.all(alive.map((w) => this.requestCooperativeShutdown(w)));
     }
     async acquireIdleWorker() {
         const idle = this.idleWorkers.shift();

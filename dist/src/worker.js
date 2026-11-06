@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
 import { collectEntriesFromFile, resolveCollectedTestFromEntries } from './collection.js';
+import V8PreciseCoverageSession from './coverage/v8-session.js';
 function requireParentPort() {
     if (!parentPort) {
         throw new Error('section-tests worker requires a parent port.');
@@ -83,7 +84,7 @@ function waitForRunToSettleOrStuck(runTask, quiesceMs) {
     });
 }
 const port = requireParentPort();
-const { workerId, captureLogd = false, captureConsoleOutput = false } = workerData;
+const { workerId, captureLogd = false, captureConsoleOutput = false, coverageEnabled = false, } = workerData;
 const fileCache = new Map();
 let busy = false;
 let retiring = false;
@@ -92,11 +93,61 @@ let currentExecution = null;
 /** Current test while `executeTest` runs; used to attribute optional `logd` sink lines to `test-log`. */
 let activeTestForSink = null;
 let writingCapturedStream = false;
+let coverageSession = null;
+let coverageStartError = null;
+let awaitingCoverageAck = false;
 function emit(message) {
     port.postMessage(message);
 }
 function emitLifecycle(message) {
     emit(message);
+}
+async function startCoverageIfEnabled() {
+    if (!coverageEnabled)
+        return;
+    try {
+        const session = new V8PreciseCoverageSession();
+        await session.start();
+        coverageSession = session;
+    }
+    catch (err) {
+        coverageStartError = err instanceof Error ? err.message : String(err);
+    }
+}
+async function finalizeCoverageAndExit() {
+    if (!coverageEnabled) {
+        process.exit(0);
+        return;
+    }
+    const finishPayload = (payload, error) => {
+        emitLifecycle({
+            type: 'coverage-result',
+            workerId,
+            payload,
+            error,
+        });
+        awaitingCoverageAck = true;
+    };
+    if (coverageStartError) {
+        finishPayload(undefined, coverageStartError);
+        return;
+    }
+    const session = coverageSession;
+    coverageSession = null;
+    try {
+        if (!session) {
+            finishPayload(undefined, 'section-tests: coverage session missing.');
+            return;
+        }
+        const raw = await session.takeSnapshot();
+        await session.stop();
+        const payload = JSON.parse(JSON.stringify(raw));
+        finishPayload(payload, undefined);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        finishPayload(undefined, msg);
+    }
 }
 function emitRetire(reason, test, timeout) {
     if (retiring)
@@ -222,6 +273,7 @@ function installConsoleCapture() {
     wrapStreamWrite(process.stderr, 'error');
 }
 async function bootstrapWorker() {
+    await startCoverageIfEnabled();
     if (captureConsoleOutput) {
         installConsoleCapture();
     }
@@ -565,7 +617,7 @@ async function executeTest(test) {
         activeTestForSink = null;
         busy = false;
         if (shuttingDown) {
-            process.exit(0);
+            void finalizeCoverageAndExit();
             return;
         }
         if (!retiring) {
@@ -577,10 +629,16 @@ async function executeTest(test) {
     }
 }
 port.on('message', (message) => {
+    if (message.type === 'coverage-ack') {
+        if (awaitingCoverageAck) {
+            process.exit(0);
+        }
+        return;
+    }
     if (message.type === 'shutdown') {
         shuttingDown = true;
         if (!busy)
-            process.exit(0);
+            void finalizeCoverageAndExit();
         return;
     }
     if (retiring || busy) {

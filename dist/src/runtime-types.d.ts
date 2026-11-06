@@ -153,13 +153,33 @@ export interface WorkerRunTestCommand {
 export interface WorkerShutdownCommand {
     type: 'shutdown';
 }
-export type WorkerCommand = WorkerRunTestCommand | WorkerShutdownCommand;
+/** Parent acknowledges `coverage-result` so the worker may exit after `postMessage` is processed. */
+export interface WorkerCoverageAckCommand {
+    type: 'coverage-ack';
+}
+export type WorkerCommand = WorkerRunTestCommand | WorkerShutdownCommand | WorkerCoverageAckCommand;
+/** JSON-serializable output of `Profiler.takePreciseCoverage`. */
+export type PreciseCoverageSnapshotJson = Array<{
+    scriptId: string;
+    url: string;
+    functions: Array<{
+        functionName: string;
+        isBlockCoverage: boolean;
+        ranges: Array<{
+            startOffset: number;
+            endOffset: number;
+            count: number;
+        }>;
+    }>;
+}>;
 export interface WorkerBootstrapData {
     workerId: string;
     /** When true, register a `logd` sink (if the package is installed) so log lines become `test-log` events. The runner enables this for `--test-logs` or `--agent-output`. */
     captureLogd?: boolean;
     /** When true, capture worker `console.*` / stdout / stderr writes as `test-log` events instead of letting them corrupt live reporter output. */
     captureConsoleOutput?: boolean;
+    /** When true, collect V8 precise coverage and send `coverage-result` before exit. */
+    coverageEnabled?: boolean;
 }
 export interface WorkerLifecycleMessageBase {
     workerId: string;
@@ -176,6 +196,12 @@ export interface WorkerRetireMessage extends WorkerLifecycleMessageBase {
     testId?: string;
     timeout?: TimeoutInfo;
 }
-export type WorkerLifecycleMessage = WorkerReadyMessage | WorkerIdleMessage | WorkerRetireMessage;
+export interface CoverageResultMessage extends WorkerLifecycleMessageBase {
+    type: 'coverage-result';
+    payload?: PreciseCoverageSnapshotJson;
+    /** Set when the worker could not collect coverage (inspector failure, etc.). */
+    error?: string;
+}
+export type WorkerLifecycleMessage = WorkerReadyMessage | WorkerIdleMessage | WorkerRetireMessage | CoverageResultMessage;
 export type WorkerMessage = TestEvent | WorkerLifecycleMessage;
 //# sourceMappingURL=runtime-types.d.ts.map

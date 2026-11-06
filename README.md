@@ -161,6 +161,14 @@ test('times out cleanly', {
 });
 ```
 
+## Coverage
+
+Enable with `--coverage` and at least one **`--coverage-include=<glob>`** (repeatable). Optional **`--coverage-exclude=<glob>`** removes paths from the eligible set. **`--coverage-report=lcov`** writes `coverage/lcov.info`. **`--coverage-min=<0–100>`** fails the run if overall line coverage is below that value (and every eligible file was measured).
+
+Point includes at **authored sources** you care about—for example `src/**/*.ts` and `bin/**/*.ts` in a TypeScript package. V8 still executes the compiled JavaScript under whatever `compilerOptions.outDir` your project uses (`dist/`, `build/`, `lib/`, etc.); source maps map coverage back to those `.ts` paths. Listing only `**/*.js` under `outDir` is valid but often **noisier** than matching source trees.
+
+The default **terminal** summary shows bars comparable to the test progress bar (**80 characters** wide): one for **how many eligible files were measured** (never-loaded files count as 0%), and one for **line hit rate inside measured files only**—so you are not shown “100%” overall while large parts of the include set were never loaded. **TTY** output wraps unmeasured paths as a **comma-separated** block (**80** columns max per line, about **four** lines then `… (+N more)`). **`--agent-output`**, **`--json-summary`**, or **non-TTY** stdout keeps **one path per line** (full list) for logs and scripting. Full per-file detail remains in **LCOV** for tooling.
+
 ## Exports
 
 - `AgentPlainReporter` — optional plain-text reporter (see `--agent-output`).

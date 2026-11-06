@@ -432,6 +432,7 @@ export default class SpecReporter implements Reporter {
         this.renderer(lines.join('\n'));
     }
 
+    /** Must match `COVERAGE_PROGRESS_BAR_WIDTH` in `coverage/report.ts` (coverage terminal bars). */
     private static readonly progressBarWidth = 80;
 
     private formatProgressLine(): string {

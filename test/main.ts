@@ -586,7 +586,9 @@ export default [
                 );
 
                 assert.equal(result.status, 1, 'timed out tests should exit non-zero');
-                assert.match(result.stdout, /teardown skipped/i);
+                // Worker may emit `teardown skipped` after quiesce, or the parent may synthesize
+                // `teardown not-run` if the grace deadline wins the race with the worker.
+                assert.match(result.stdout, /teardown (skipped|not-run)/i);
                 assert.match(result.stdout, /timeout run 120 ms/i);
                 assert.doesNotMatch(result.stdout, /teardown-completed/i);
 
@@ -1396,6 +1398,268 @@ export default [
                     });
                 });
                 assert.match(logs.join('\n'), /immediate/);
+            },
+        }),
+    ),
+
+    suite(
+        'Coverage',
+        test('does not print coverage block when disabled', {
+            timeout: 20_000,
+            async run() {
+                const fixtureDirectory = await createFixtureFile('cov-off.test.mjs', `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+export default [ test('t', async () => {}) ];
+`);
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, '--jobs=1', './cov-off.test.mjs'],
+                    { cwd: fixtureDirectory, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 0, result.stderr || result.stdout);
+                const out = stripAnsi(`${result.stdout}\n${result.stderr}`);
+                assert.doesNotMatch(out, /^Coverage$/m);
+                assert.doesNotMatch(out, /unmeasured.*eligible/i);
+            },
+        }),
+
+        test('requires --coverage-include when --coverage is set', {
+            timeout: 15_000,
+            async run() {
+                const fixtureDirectory = await createFixtureFile('cov-req.test.mjs', `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+export default [ test('t', async () => {}) ];
+`);
+                const result = spawnSync(
+                    process.execPath,
+                    [runnerPath, '--jobs=1', '--coverage', './cov-req.test.mjs'],
+                    { cwd: fixtureDirectory, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 1);
+                assert.match(result.stderr + result.stdout, /coverage-include/i);
+            },
+        }),
+
+        test('reports TypeScript lines and unmeasured orphan', {
+            timeout: 30_000,
+            async run() {
+                const fixtureRoot = join(rootDirectory, 'test', 'fixtures', 'coverage-ts');
+                const relTestFile = 'cov-basic.test.mjs';
+                const testBody = `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+import { add } from './dist/calc.js';
+
+export default [
+  test('adds', async () => {
+    if (add(1, 2) !== 3) throw new Error('bad');
+  }),
+];
+`;
+                await writeFile(join(fixtureRoot, relTestFile), testBody, 'utf8');
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        '--coverage-include=src/**/*.ts',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 0, result.stderr || result.stdout);
+                const out = stripAnsi(result.stdout);
+                assert.match(out, /unmeasured.*1\s+eligible/i);
+                assert.match(out, /orphan\.ts/);
+                // calc.ts is at full line coverage; terminal summary lists only attention rows.
+                assert.match(out, /lines\s+100(\.0)?%\s+\(of measured|100(\.0)?%\s+lines in measured files/i);
+                // Include set is dist/calc.js + src/**/*.ts → 3 eligibles; only calc is measured → <100% eligible.
+                assert.match(out, /eligible\s+\d+(\.\d+)?%\s+\(1\/3/);
+                assert.match(out, /1 measured file|other measured file.*100%/i);
+            },
+        }),
+
+        test('writes LCOV with binary DA lines for measured files', {
+            timeout: 30_000,
+            async run() {
+                const fixtureRoot = join(rootDirectory, 'test', 'fixtures', 'coverage-ts');
+                const relTestFile = 'cov-lcov.test.mjs';
+                await writeFile(
+                    join(fixtureRoot, relTestFile),
+                    `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+import { add } from './dist/calc.js';
+
+export default [ test('adds', async () => { if (add(0, 0) !== 0) throw new Error('x'); }) ];
+`,
+                    'utf8',
+                );
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        '--coverage-report=lcov',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 0, result.stderr || result.stdout);
+                const lcovPath = join(fixtureRoot, 'coverage', 'lcov.info');
+                const lcov = await readFile(lcovPath, 'utf8');
+                assert.match(lcov, /^SF:.*calc\.ts$/m);
+                assert.match(lcov, /^DA:\d+,[01]$/m);
+            },
+        }),
+
+        test('fails --coverage-min when unmeasured eligibles exist', {
+            timeout: 30_000,
+            async run() {
+                const fixtureRoot = join(rootDirectory, 'test', 'fixtures', 'coverage-ts');
+                const relTestFile = 'cov-min-unmeas.test.mjs';
+                await writeFile(
+                    join(fixtureRoot, relTestFile),
+                    `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+import { add } from './dist/calc.js';
+export default [ test('adds', async () => { add(1, 1); }) ];
+`,
+                    'utf8',
+                );
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        '--coverage-include=src/**/*.ts',
+                        '--coverage-min=50',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 1);
+                assert.match(
+                    stripAnsi(`${result.stderr}${result.stdout}`),
+                    /unmeasured|coverage-min/i,
+                );
+            },
+        }),
+
+        test('passes --coverage-min when include set has no unmeasured orphans', {
+            timeout: 30_000,
+            async run() {
+                const fixtureRoot = join(rootDirectory, 'test', 'fixtures', 'coverage-ts');
+                const relTestFile = 'cov-min-ok.test.mjs';
+                await writeFile(
+                    join(fixtureRoot, relTestFile),
+                    `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+import { add } from './dist/calc.js';
+export default [ test('adds', async () => { add(2, 2); }) ];
+`,
+                    'utf8',
+                );
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        '--coverage-exclude=**/orphan.js',
+                        '--coverage-exclude=**/orphan.ts',
+                        '--coverage-min=1',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 0, result.stderr || result.stdout);
+            },
+        }),
+
+        test('failed test still exits 1 with coverage enabled', {
+            timeout: 20_000,
+            async run() {
+                const fixtureDirectory = await createFixtureFile('cov-fail.test.mjs', `
+import assert from 'node:assert/strict';
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+export default [ test('fail', async () => assert.equal(1, 2)) ];
+`);
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=./*.mjs',
+                        './cov-fail.test.mjs',
+                    ],
+                    { cwd: fixtureDirectory, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(result.status, 1);
+                assert.match(stripAnsi(result.stdout), /Coverage/i);
+            },
+        }),
+
+        test('parallel jobs produce merged coverage', {
+            timeout: 30_000,
+            async run() {
+                const fixtureRoot = join(rootDirectory, 'test', 'fixtures', 'coverage-ts');
+                const relTestFile = 'cov-par.test.mjs';
+                await writeFile(
+                    join(fixtureRoot, relTestFile),
+                    `
+import { test } from ${JSON.stringify(sectionTestsImportUrl)};
+import { add } from './dist/calc.js';
+export default [
+  test('a', async () => { add(1, 0); }),
+  test('b', async () => { add(0, 1); }),
+];
+`,
+                    'utf8',
+                );
+                const r1 = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=1',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                const r2 = spawnSync(
+                    process.execPath,
+                    [
+                        runnerPath,
+                        '--jobs=2',
+                        '--coverage',
+                        '--coverage-include=dist/calc.js',
+                        `./${relTestFile}`,
+                    ],
+                    { cwd: fixtureRoot, encoding: 'utf8', env: process.env },
+                );
+                assert.equal(r1.status, 0, r1.stderr || r1.stdout);
+                assert.equal(r2.status, 0, r2.stderr || r2.stdout);
+                const o1 = stripAnsi(r1.stdout);
+                const o2 = stripAnsi(r2.stdout);
+                function extractOverallLinePct(block: string): string | undefined {
+                    const tty = block.match(/(\d+\.\d+)%\s+lines in measured files/);
+                    if (tty) return tty[1];
+                    const plain = block.match(/lines\s+(\d+\.\d+)%\s+\(of measured/i);
+                    if (plain) return plain[1];
+                    return undefined;
+                }
+                const pct1 = extractOverallLinePct(o1);
+                const pct2 = extractOverallLinePct(o2);
+                assert.ok(pct1 !== undefined && pct2 !== undefined, 'expected overall line % in coverage output');
+                assert.equal(pct1, pct2);
             },
         }),
     ),
